@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "errors": [],
+  "logs": [
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/role-select.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/student-submit.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/student-status.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/teacher-queue.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/teacher-grade.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/student-feedback.png"
+  ]
+}

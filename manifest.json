@@ -1,0 +1,16 @@
+{
+  "name": "Amyl 课堂",
+  "short_name": "Amyl课堂",
+  "description": "买课、买物料、交作业。演示预览，不接真实付款。",
+  "start_url": "./index.html#home",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F6F1E8",
+  "theme_color": "#F6F1E8",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

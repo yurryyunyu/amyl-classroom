@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "errors": [],
+  "logs": [
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/home.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/courses.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/course-detail.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/checkout.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/shop.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/learn.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/homework-submit.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/homework-feedback.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/me.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/member.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/community.png",
+    "saved /workspace/amylcoffee/course-app-preview/screenshots/post-detail.png"
+  ]
+}
