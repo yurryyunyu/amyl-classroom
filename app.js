@@ -87,14 +87,28 @@
 
   function normalizeHomeworkItem(h) {
     const photos = (h.photos && h.photos.length) ? h.photos.slice() : (h.photo ? [h.photo] : []);
-    return Object.assign({}, h, {
+    const item = Object.assign({}, h, {
       photos,
       photo: photos[0] || h.photo || "",
       params: Object.assign({}, h.params || {}),
       type: h.type === "latte" ? "latte" : "brew",
       studentId: h.studentId || "me",
-      studentName: h.studentName || (h.studentId && DATA.authors[h.studentId] ? DATA.authors[h.studentId].name : DATA.user.name)
+      studentName: h.studentName || (h.studentId && DATA.authors[h.studentId] ? DATA.authors[h.studentId].name : DATA.user.name),
+      feedbackUnread: h.feedbackUnread === true
     });
+    if (item.feedback) {
+      const fb = Object.assign({}, item.feedback);
+      fb.itemNotes = Object.assign({}, fb.itemNotes || {});
+      fb.markers = normalizeMarkers(fb.markers);
+      if (fb.rubric) {
+        fb.rubric.forEach((r) => {
+          if (r && r.key && r.note && !fb.itemNotes[r.key]) fb.itemNotes[r.key] = r.note;
+        });
+      }
+      if (item.status === "graded" && fb.pointsAwarded == null) fb.pointsAwarded = true;
+      item.feedback = fb;
+    }
+    return item;
   }
 
   function loadState() {
@@ -161,7 +175,8 @@
           pointsHistory: state.pointsHistory,
           role: state.role,
           teacherFilter: state.teacherFilter,
-          teacherTypeFilter: state.teacherTypeFilter
+          teacherTypeFilter: state.teacherTypeFilter,
+          draftGrade: state.draftGrade || {}
         })
       );
     } catch (e) { /* ignore quota */ }
@@ -651,6 +666,178 @@
     `;
   }
 
+  function unreadFeedbackCount() {
+    return myHomework().filter((h) => h.status === "graded" && h.feedbackUnread).length;
+  }
+
+  function normalizeMarkers(list) {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((m, i) => {
+        if (!m || typeof m !== "object") return null;
+        const x = Math.max(4, Math.min(96, Number(m.x)));
+        const y = Math.max(4, Math.min(96, Number(m.y)));
+        if (!isFinite(x) || !isFinite(y)) return null;
+        return {
+          id: String(m.id || "mk-" + i),
+          photoIndex: Math.max(0, Number(m.photoIndex) || 0),
+          x,
+          y,
+          note: String(m.note || "").trim()
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function imageContentBox(img) {
+    const rect = img.getBoundingClientRect();
+    const nw = img.naturalWidth || 0;
+    const nh = img.naturalHeight || 0;
+    if (!nw || !nh || !rect.width || !rect.height) {
+      return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    }
+    const scale = Math.min(rect.width / nw, rect.height / nh);
+    const width = nw * scale;
+    const height = nh * scale;
+    return {
+      left: rect.left + (rect.width - width) / 2,
+      top: rect.top + (rect.height - height) / 2,
+      width,
+      height
+    };
+  }
+
+  function layoutPinLayer(stage) {
+    if (!stage) return;
+    const img = stage.querySelector(".fb-main-photo");
+    const layer = stage.querySelector(".fb-pins");
+    if (!img || !layer) return;
+    const box = imageContentBox(img);
+    const s = stage.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    layer.style.left = box.left - s.left + "px";
+    layer.style.top = box.top - s.top + "px";
+    layer.style.width = box.width + "px";
+    layer.style.height = box.height + "px";
+  }
+
+  function pointToPercent(img, clientX, clientY) {
+    const box = imageContentBox(img);
+    if (!box.width || !box.height) return null;
+    const x = ((clientX - box.left) / box.width) * 100;
+    const y = ((clientY - box.top) / box.height) * 100;
+    if (x < 0 || x > 100 || y < 0 || y > 100) return null;
+    return { x: Math.max(4, Math.min(96, x)), y: Math.max(4, Math.min(96, y)) };
+  }
+
+  function renderPins(markers, photoIndex, action) {
+    const all = markers || [];
+    return all
+      .map((m, i) => {
+        if (m.photoIndex !== photoIndex) return "";
+        return `<button type="button" class="fb-pin" style="left:${m.x}%;top:${m.y}%" data-action="${esc(action)}" data-marker="${esc(m.id)}" aria-label="标注 ${i + 1}">${i + 1}</button>`;
+      })
+      .join("");
+  }
+
+  function renderMarkerList(markers, photos, interactive) {
+    const list = markers || [];
+    if (!list.length) return "";
+    return `<ul class="fb-marker-list" data-testid="marker-list">
+      ${list
+        .map((m, i) => {
+          const many = photos && photos.length > 1;
+          return `<li>
+            <span class="fb-pin-num">${i + 1}</span>
+            <span class="fb-marker-text">${esc(m.note || "（未写短评）")}${many ? `<em>第 ${m.photoIndex + 1} 张</em>` : ""}</span>
+            ${
+              interactive
+                ? `<button type="button" class="fb-mini" data-action="edit-marker" data-marker="${esc(m.id)}">改</button>
+                   <button type="button" class="fb-mini" data-action="delete-marker" data-marker="${esc(m.id)}">删</button>`
+                : ""
+            }
+          </li>`;
+        })
+        .join("")}
+    </ul>`;
+  }
+
+  function renderFeedbackPhoto(photos, markers, photoIndex, opts) {
+    const list = photos && photos.length ? photos : [];
+    const interactive = !!(opts && opts.interactive);
+    if (!list.length) {
+      return `<div class="fb-photo-card" id="fb-photo-card"><div class="fb-stage empty"><p>没有照片</p></div></div>`;
+    }
+    const idx = Math.max(0, Math.min(list.length - 1, photoIndex || 0));
+    const src = list[idx];
+    const mode = interactive && opts && opts.markMode ? "mark" : "zoom";
+    const pinAction = interactive ? "edit-marker" : "show-marker-note";
+    const thumbs =
+      list.length > 1
+        ? `<div class="fb-thumbs" role="list">
+            ${list
+              .map(
+                (p, i) =>
+                  `<button type="button" class="fb-thumb ${i === idx ? "on" : ""}" data-action="fb-thumb" data-index="${i}" aria-label="第 ${i + 1} 张">
+                    <img src="${esc(p)}" alt="">
+                  </button>`
+              )
+              .join("")}
+          </div>`
+        : "";
+    const tools = interactive
+      ? `<div class="fb-photo-tools">
+           <button type="button" class="fb-mode ${mode === "mark" ? "on" : ""}" data-action="toggle-mark-mode" data-testid="toggle-mark-mode">${mode === "mark" ? "退出标注" : "在照片上标注"}</button>
+           <button type="button" class="fb-mode" data-action="zoom-photo" data-src="${esc(src)}" data-index="${idx}">全屏查看</button>
+         </div>
+         <p class="tiny fb-photo-hint">${mode === "mark" ? "点照片上的位置，写一句短评，例如「这里奶泡太厚」。" : "点照片可放大。打开标注后，可在图上加编号备注。"}</p>`
+      : "";
+    return `<div class="fb-photo-card" id="fb-photo-card" data-mode="${mode}">
+      <div class="fb-stage" id="fb-stage">
+        <img class="fb-main-photo" id="fb-main-photo" src="${esc(src)}" alt="作业照片" data-index="${idx}" data-src="${esc(src)}">
+        <div class="fb-pins">${renderPins(markers, idx, pinAction)}</div>
+      </div>
+      ${thumbs}
+      ${tools}
+      ${renderMarkerList(markers, list, interactive)}
+    </div>`;
+  }
+
+  let pendingNewMarker = null;
+  let pinLayoutObserver = null;
+
+  function bindPinLayout(stage) {
+    if (pinLayoutObserver) {
+      pinLayoutObserver.disconnect();
+      pinLayoutObserver = null;
+    }
+    if (!stage) return;
+    const img = stage.querySelector(".fb-main-photo");
+    const layout = () => layoutPinLayer(stage);
+    if (img) {
+      if (img.complete && img.naturalWidth) layout();
+      else img.addEventListener("load", layout, { once: true });
+    }
+    if (typeof ResizeObserver !== "undefined") {
+      pinLayoutObserver = new ResizeObserver(layout);
+      pinLayoutObserver.observe(stage);
+      if (img) pinLayoutObserver.observe(img);
+    }
+  }
+
+  function refreshFeedbackPhoto(id) {
+    const wrap = $("#fb-photo-card");
+    const h = state.homework.find((x) => x.id === id);
+    if (!wrap || !h) return;
+    const d = gradeDraftFor(id);
+    wrap.outerHTML = renderFeedbackPhoto(h.photos, d.markers, d.photoIndex, {
+      interactive: true,
+      markMode: d.markMode
+    });
+    bindFeedbackPhotoEvents(id);
+  }
+
+
   function renderLearn() {
     const ids = Object.keys(state.enrolled);
     return `
@@ -709,7 +896,7 @@
           : `<div class="card pad"><p>还没有课程。先去课程页看看吧。</p><a class="btn-primary" href="#courses" style="margin-top:12px">浏览课程</a></div>`
       }
       <div class="quick">
-        <a href="#homework"><strong>我的作业</strong><em>Homework</em></a>
+        <a href="#homework"><strong>我的作业</strong><em>Homework</em>${unreadFeedbackCount() ? `<span class="unread-badge" data-testid="unread-feedback">新反馈</span>` : ""}</a>
         <a href="#shop"><strong>课程物料</strong><em>Materials</em></a>
       </div>
     `;
@@ -757,6 +944,7 @@
                 <div class="meta-row" style="margin:0 0 4px">
                   ${typeBadge(h.type)}
                   <span class="tag-status ${pending ? "pending" : "graded"}">${pending ? "待批改" : "已批改"}</span>
+                  ${h.feedbackUnread ? `<span class="unread-badge" data-testid="unread-feedback">新反馈</span>` : ""}
                   ${demoTag()}
                 </div>
                 <h3>${esc(typ.nameZh)}</h3>
@@ -909,7 +1097,14 @@
     const h = state.homework.find((x) => x.id === id);
     if (!h) return `<div class="empty"><p>找不到这份作业。</p><a href="#student/homework">返回作业</a></div>`;
     const pending = h.status === "pending";
-    const fb = h.feedback;
+    const fb = h.feedback || {};
+    const markers = normalizeMarkers(fb.markers);
+    const itemNotes = Object.assign({}, fb.itemNotes || {});
+    if (fb.rubric) {
+      fb.rubric.forEach((r) => {
+        if (r && r.key && r.note && !itemNotes[r.key]) itemNotes[r.key] = r.note;
+      });
+    }
     return `
       <div class="meta-row">
         ${typeBadge(h.type)}
@@ -917,34 +1112,38 @@
         ${demoTag()}
       </div>
       <h2 class="block-title" style="margin-top:6px">${esc(hwTypeMeta(h.type).nameZh)}<span class="en">${esc(hwTypeMeta(h.type).nameEn)}</span></h2>
-      <article class="card" style="margin-bottom:14px">
-        ${renderPhotoStrip(h.photos)}
+      <article class="card fb-student-photo" style="margin-bottom:14px">
+        ${renderFeedbackPhoto(h.photos, markers, 0, { interactive: false })}
         <div class="pad">
           <p class="tiny">提交于 ${esc(h.submittedAt)}${h.photos && h.photos.length > 1 ? " · " + h.photos.length + " 张照片" : ""}</p>
           <div class="form-grid" style="margin-top:10px">
             ${renderHwParams(h)}
           </div>
-          <p style="margin-top:12px">${esc(h.notes)}</p>
+          ${h.notes ? `<p style="margin-top:12px">${esc(h.notes)}</p>` : ""}
         </div>
       </article>
       ${
         pending
           ? `<div class="card pad"><p>老师还没有批改。交出去后会出现在老师的批改台里（演示，数据存在这台设备上）。</p></div>`
           : `<div class="feedback-box" data-testid="feedback-box">
-              <div class="who">${avatarHTML("amy", "sm")}<span>${esc(fb.by)} 的批改</span> <span class="tag-status teacher">老师</span></div>
-              <p>${esc(fb.comments)}</p>
+              <div class="who">${avatarHTML("amy", "sm")}<span>${esc(fb.by || "Amy Liu")} 的反馈</span> <span class="tag-status teacher">老师</span></div>
+              <p class="fb-score-line" data-testid="feedback-score"><strong>${fb.total}/${fb.max}</strong> · ${esc(fb.badge || "")}</p>
+              <p class="fb-comment-text">${esc(fb.comments || "")}</p>
               ${fb.commentsEn ? `<p class="en">${esc(fb.commentsEn)}</p>` : ""}
-              ${fb.tip ? `<p style="margin-top:8px"><strong>提示 · </strong>${esc(fb.tip)}</p>` : ""}
+              ${fb.tip ? `<p style="margin-top:8px"><strong>提示</strong> ${esc(fb.tip)}</p>` : ""}
             </div>
             <h2 class="block-title">评分细则<span class="en">Rubric</span></h2>
             <div class="card pad rubric">
-              ${fb.rubric
-                .map(
-                  (r) =>
-                    `<div class="r-row"><span>${esc(r.nameZh)} <span class="tiny">${esc(r.nameEn)}</span></span><span class="score">${r.score}/${r.max}</span></div>`
-                )
+              ${(fb.rubric || [])
+                .map((r) => {
+                  const note = (r.key && itemNotes[r.key]) || r.note || "";
+                  return `<div class="fb-r-block">
+                    <div class="r-row"><span>${esc(r.nameZh)} <span class="tiny">${esc(r.nameEn)}</span></span><span class="score">${r.score}/${r.max}</span></div>
+                    ${note ? `<p class="fb-item-note-view">${esc(note)}</p>` : ""}
+                  </div>`;
+                })
                 .join("")}
-              <div class="r-row"><strong>合计 · ${esc(fb.badge)}</strong><span class="score">${fb.total}/${fb.max}</span></div>
+              <div class="r-row"><strong>合计 · ${esc(fb.badge || "")}</strong><span class="score">${fb.total}/${fb.max}</span></div>
             </div>`
       }
     `;
@@ -1221,7 +1420,7 @@
                 </div>
                 <h3>${esc(h.studentName)}</h3>
                 <p class="sub">${esc(typ.nameZh)}${extra ? " · " + esc(extra) : ""} · ${esc(h.submittedAt)}</p>
-                ${h.feedback ? `<p class="sub">${h.feedback.total}/${h.feedback.max} · ${esc(h.feedback.badge)}</p>` : ""}
+                ${h.feedback ? `<p class="sub">${h.feedback.total}/${h.feedback.max} · ${esc(h.feedback.badge)}</p>` : `<p class="sub">打开反馈窗口</p>`}
               </div>
             </div>
           </a>`;
@@ -1237,15 +1436,50 @@
     const saved = state.draftGrade[id] || {};
     const list = rubricFor(h && h.type);
     const rubric = {};
+    const itemNotes = Object.assign({}, existing.itemNotes || {}, saved.itemNotes || {});
+    if (existing.rubric) {
+      existing.rubric.forEach((r) => {
+        const key = r.key || (list.find((x) => x.nameZh === r.nameZh) || {}).key;
+        if (key && r.note && itemNotes[key] == null) itemNotes[key] = r.note;
+      });
+    }
     list.forEach((r) => {
-      const prev = (existing.rubric || []).find((x) => x.nameZh === r.nameZh || x.nameEn === r.nameEn);
+      const prev = (existing.rubric || []).find((x) => x.key === r.key || x.nameZh === r.nameZh || x.nameEn === r.nameEn);
       rubric[r.key] = saved.rubric && saved.rubric[r.key] != null ? saved.rubric[r.key] : (prev ? prev.score : 8);
     });
+    const markers = saved.markers ? normalizeMarkers(saved.markers) : normalizeMarkers(existing.markers);
     return {
       comments: saved.comments != null ? saved.comments : (existing.comments || ""),
       tip: saved.tip != null ? saved.tip : (existing.tip || ""),
-      rubric
+      rubric,
+      itemNotes,
+      markers,
+      photoIndex: saved.photoIndex != null ? saved.photoIndex : 0,
+      markMode: Boolean(saved.markMode)
     };
+  }
+
+  function syncGradeFormToDraft(id) {
+    const base = gradeDraftFor(id);
+    const commentsEl = $("#grade-comments");
+    const scores = $("#grade-rubric") ? currentRubricScores() : base.rubric;
+    const itemNotes = Object.assign({}, base.itemNotes);
+    $$("[data-item-note]").forEach((el) => {
+      itemNotes[el.getAttribute("data-item-note")] = el.value;
+    });
+    const photoEl = $("#fb-main-photo");
+    const photoIndex = photoEl ? Number(photoEl.getAttribute("data-index")) || 0 : base.photoIndex || 0;
+    const prev = state.draftGrade[id] || {};
+    state.draftGrade[id] = {
+      comments: commentsEl ? commentsEl.value : base.comments,
+      tip: base.tip,
+      rubric: Object.keys(scores).length ? scores : base.rubric,
+      itemNotes,
+      markers: prev.markers ? normalizeMarkers(prev.markers) : (base.markers || []),
+      photoIndex,
+      markMode: Boolean(prev.markMode)
+    };
+    return state.draftGrade[id];
   }
 
   function renderTeacherGrade(id) {
@@ -1257,56 +1491,71 @@
     const scores = rubric.map((r) => d.rubric[r.key] || 0);
     const total = scores.reduce((a, b) => a + b, 0);
     const max = rubric.length * 10;
+    const badge = badgeFor(total, max);
+    const already = h.status === "graded";
+    const recipeLabel = typ.id === "latte" ? "学员笔记" : "冲煮记录";
     return `
-      <div class="meta-row">
-        ${typeBadge(h.type)}
-        <span class="tag-status ${h.status === "pending" ? "pending" : "graded"}">${h.status === "pending" ? "待批改" : "已批改"}</span>
-        ${demoTag()}
-      </div>
-      <h2 class="block-title" style="margin-top:6px">${esc(h.studentName)}<span class="en">${esc(typ.nameZh)} · ${esc(typ.nameEn)}</span></h2>
-      <article class="card" style="margin-bottom:14px">
-        ${renderPhotoStrip(h.photos)}
-        <div class="pad">
-          <p class="tiny">提交于 ${esc(h.submittedAt)}</p>
-          <div class="form-grid" style="margin-top:10px">
+      <div class="fb-window" data-testid="feedback-window">
+        <div class="meta-row">
+          ${typeBadge(h.type)}
+          <span class="tag-status ${already ? "graded" : "pending"}">${already ? "已发送" : "待发送"}</span>
+          ${demoTag()}
+        </div>
+        <div class="fb-student">
+          ${avatarHTML(h.studentId === "me" ? "me" : h.studentId, "md")}
+          <div>
+            <h2 class="fb-name">${esc(h.studentName)}</h2>
+            <p class="sub">${esc(typ.nameZh)} · 提交于 ${esc(h.submittedAt)}</p>
+          </div>
+        </div>
+        ${renderFeedbackPhoto(h.photos, d.markers, d.photoIndex, { interactive: true, markMode: d.markMode })}
+        <article class="card pad" style="margin:12px 0">
+          <p class="tiny">${esc(recipeLabel)}</p>
+          <div class="form-grid" style="margin-top:8px">
             ${renderHwParams(h)}
           </div>
-          <p style="margin-top:12px">${esc(h.notes)}</p>
-        </div>
-      </article>
-      <form class="form" id="grade-form" data-id="${esc(id)}" data-type="${esc(h.type)}">
-        <div class="field">
-          <label>快捷评语 <span class="hint">Templates · 示例</span></label>
-          <div class="templates">
-            ${templatesFor(h.type).map((tp) => `<button type="button" data-action="grade-template" data-text="${esc(tp.text)}">${esc(tp.title)}</button>`).join("")}
+          ${h.notes ? `<p style="margin-top:12px">${esc(h.notes)}</p>` : `<p class="sub" style="margin-top:12px">学员没有写笔记。</p>`}
+        </article>
+        <form class="form" id="grade-form" data-id="${esc(id)}" data-type="${esc(h.type)}">
+          <div class="fb-total-card" id="grade-live">
+            <span class="tiny">合计</span>
+            <strong id="grade-total" data-testid="grade-total">${total}/${max}</strong>
+            <span class="fb-live-badge" id="grade-badge">${esc(badge)}</span>
           </div>
-        </div>
-        <div class="field">
-          <label>评语 Comments</label>
-          <textarea name="comments" id="grade-comments" placeholder="写给学生的批改…">${esc(d.comments)}</textarea>
-        </div>
-        <div class="field">
-          <label>提示（可选） <span class="hint">Tip</span></label>
-          <input name="tip" id="grade-tip" value="${esc(d.tip)}" placeholder="一句可执行的小建议" />
-        </div>
-        <h2 class="block-title">评分细则<span class="en">${esc(typ.nameZh)} rubric · /10 · 示例</span></h2>
-        <div class="card pad rubric" id="grade-rubric">
-          ${rubric
-            .map(
-              (r) => `<div class="r-row">
-                <span>${esc(r.nameZh)} <span class="tiny">${esc(r.nameEn)}</span></span>
-                <div class="stepper">
-                  <button type="button" data-action="rubric-delta" data-key="${esc(r.key)}" data-delta="-1" aria-label="减少">−</button>
-                  <output data-key="${esc(r.key)}">${d.rubric[r.key]}</output>
-                  <button type="button" data-action="rubric-delta" data-key="${esc(r.key)}" data-delta="1" aria-label="增加">+</button>
-                </div>
-              </div>`
-            )
-            .join("")}
-          <div class="r-row"><strong>合计</strong><span class="score" id="grade-total">${total}/${max}</span></div>
-        </div>
-        <button class="btn-primary" type="submit" data-testid="submit-grade" style="margin-top:16px">提交批改（演示）</button>
-      </form>
+          <h2 class="block-title">评分<span class="en">${esc(typ.nameZh)} · 每项 10 分</span></h2>
+          <div class="card pad rubric" id="grade-rubric">
+            ${rubric
+              .map(
+                (r) => `<div class="fb-r-block">
+                  <div class="r-row">
+                    <span>${esc(r.nameZh)} <span class="tiny">${esc(r.nameEn)}</span></span>
+                    <div class="stepper">
+                      <button type="button" data-action="rubric-delta" data-key="${esc(r.key)}" data-delta="-1" aria-label="减少 ${esc(r.nameZh)}">−</button>
+                      <output data-key="${esc(r.key)}">${d.rubric[r.key]}</output>
+                      <button type="button" data-action="rubric-delta" data-key="${esc(r.key)}" data-delta="1" aria-label="增加 ${esc(r.nameZh)}">+</button>
+                    </div>
+                  </div>
+                  <input class="fb-item-note" data-item-note="${esc(r.key)}" maxlength="40" placeholder="这项的短评（可选）" value="${esc(d.itemNotes[r.key] || "")}">
+                </div>`
+              )
+              .join("")}
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label>评语</label>
+            <textarea name="comments" id="grade-comments" class="fb-comment" rows="6" placeholder="用你自己的话写给学生">${esc(d.comments)}</textarea>
+          </div>
+          <div class="field">
+            <label>插入常用评语 <span class="hint">点一下加到评语里，不会自动填写</span></label>
+            <div class="templates">
+              ${templatesFor(h.type).map((tp) => `<button type="button" data-action="grade-template" data-text="${esc(tp.text)}">${esc(tp.title)}</button>`).join("")}
+            </div>
+          </div>
+          <div class="fb-actions">
+            <button type="button" class="btn-ghost" data-action="save-grade-draft" data-id="${esc(id)}" data-testid="save-grade-draft">保存草稿</button>
+            <button class="btn-primary" type="submit" data-testid="submit-grade">${already ? "更新反馈" : "发送反馈"}</button>
+          </div>
+        </form>
+      </div>
     `;
   }
 
@@ -1379,7 +1628,7 @@
       const tmap = {
         queue: { title: "批改台", sub: "Review", hideCart: true },
         homework: { title: "批改台", sub: "Review", hideCart: true },
-        grade: { title: "批改作业", sub: "Grade", back: "#teacher/queue", hideCart: true },
+        grade: { title: "反馈窗口", sub: "Feedback", back: "#teacher/queue", hideCart: true },
         students: { title: "学员", sub: "Students", hideCart: true },
         community: { title: "社区", sub: "Community", hideCart: true },
         post: { title: "帖子", sub: "Post", back: "#teacher/community", hideCart: true },
@@ -1453,7 +1702,7 @@
         <a href="#student/home" data-tab="home">${ICONS.home}<span>首页</span></a>
         <a href="#student/courses" data-tab="courses">${ICONS.book}<span>课程</span></a>
         <a href="#student/community" data-tab="community">${ICONS.community}<span>社区</span></a>
-        <a href="#student/learn" data-tab="learn">${ICONS.learn}<span>学习</span></a>
+        <a href="#student/learn" data-tab="learn">${ICONS.learn}<span>学习</span>${unreadFeedbackCount() ? `<span class="tab-badge unread" data-testid="unread-tab">${unreadFeedbackCount()}</span>` : ""}</a>
         <a href="#student/me" data-tab="me">${ICONS.me}<span>我的</span></a>
       `;
     }
@@ -1484,14 +1733,87 @@
 
   function closeOverlay() {
     const o = $("#overlay");
+    const cancelId = pendingNewMarker && pendingNewMarker.hwId;
+    const cancelMk = pendingNewMarker && pendingNewMarker.id;
+    if (pendingNewMarker) {
+      const draft = state.draftGrade[pendingNewMarker.hwId];
+      if (draft && draft.markers) {
+        draft.markers = draft.markers.filter((m) => m.id !== pendingNewMarker.id);
+      }
+      pendingNewMarker = null;
+    }
     o.hidden = true;
     o.innerHTML = "";
+    o.classList.remove("fb-zoom-overlay");
+    if (cancelId && cancelMk) refreshFeedbackPhoto(cancelId);
   }
 
-  function openOverlay(inner) {
+  function openOverlay(inner, mode) {
     const o = $("#overlay");
     o.innerHTML = inner;
     o.hidden = false;
+    o.classList.toggle("fb-zoom-overlay", mode === "zoom");
+  }
+
+  function openPhotoZoom(src, markers, photoIndex) {
+    const list = markers || [];
+    const notes = list
+      .map((m, i) => (m.photoIndex === photoIndex && m.note ? `<li><span class="fb-pin-num">${i + 1}</span>${esc(m.note)}</li>` : ""))
+      .join("");
+    openOverlay(
+      `
+      <div class="fb-zoom" role="dialog" aria-label="查看照片">
+        <button class="fb-zoom-close" type="button" data-action="close-overlay">关闭</button>
+        <div class="fb-stage fb-stage-zoom" id="fb-zoom-stage">
+          <img class="fb-main-photo" src="${esc(src)}" alt="作业照片大图">
+          <div class="fb-pins">${renderPins(list, photoIndex, "show-marker-note")}</div>
+        </div>
+        ${notes ? `<ol class="fb-zoom-notes">${notes}</ol>` : ""}
+      </div>`,
+      "zoom"
+    );
+    bindPinLayout($("#fb-zoom-stage"));
+  }
+
+  function openMarkerSheet(hwId, marker, isNew) {
+    if (isNew) pendingNewMarker = { hwId, id: marker.id };
+    else pendingNewMarker = null;
+    openOverlay(`
+      <div class="sheet" role="dialog" aria-labelledby="mk-title">
+        <div class="handle"></div>
+        <h2 id="mk-title">${isNew ? "添加标注" : "编辑标注"}</h2>
+        <p class="sub">写一句短评，学生会在照片上看到这个编号。</p>
+        <form id="marker-form" data-id="${esc(hwId)}" data-marker="${esc(marker.id)}" data-new="${isNew ? "1" : "0"}">
+          <div class="field">
+            <label>短评</label>
+            <input id="marker-note" name="note" maxlength="40" value="${esc(marker.note || "")}" placeholder="例如：这里奶泡太厚" data-testid="marker-note">
+          </div>
+          <button class="btn-primary" type="submit">保存标注</button>
+          <button class="btn-ghost" type="button" data-action="${isNew ? "cancel-new-marker" : "delete-marker"}" data-marker="${esc(marker.id)}" style="margin-top:8px">${isNew ? "取消" : "删除标注"}</button>
+        </form>
+      </div>
+    `);
+    const form = $("#marker-form");
+    const input = $("#marker-note");
+    if (input) setTimeout(() => input.focus(), 40);
+    if (form) {
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const note = (input && input.value.trim()) || "";
+        if (!note) {
+          showToast("请写一句短评");
+          return;
+        }
+        syncGradeFormToDraft(hwId);
+        const draft = state.draftGrade[hwId];
+        const m = draft.markers.find((x) => x.id === marker.id);
+        if (m) m.note = note;
+        pendingNewMarker = null;
+        closeOverlay();
+        refreshFeedbackPhoto(hwId);
+        showToast("标注已加上");
+      });
+    }
   }
 
   function openCheckout(opts) {
@@ -1762,6 +2084,16 @@
     const max = rubricFor(type).length * 10;
     const el = $("#grade-total");
     if (el) el.textContent = total + "/" + max;
+    const b = $("#grade-badge");
+    if (b) b.textContent = badgeFor(total, max);
+  }
+
+  function saveGradeDraft(id) {
+    const h = state.homework.find((x) => x.id === id);
+    if (!h) return;
+    syncGradeFormToDraft(id);
+    saveState();
+    showToast("草稿已保存，学生还看不到");
   }
 
   function badgeFor(total, max) {
@@ -1774,41 +2106,90 @@
   function submitGrade(id) {
     const h = state.homework.find((x) => x.id === id);
     if (!h) return;
-    const comments = ($("#grade-comments") && $("#grade-comments").value.trim()) || "";
+    const draft = syncGradeFormToDraft(id);
+    const comments = (draft.comments || "").trim();
     if (!comments) {
-      showToast("请先写一句评语（演示）");
+      showToast("请先写一句评语");
       return;
     }
-    const tip = ($("#grade-tip") && $("#grade-tip").value.trim()) || "";
-    const scores = currentRubricScores();
+    const scores = draft.rubric || currentRubricScores();
+    const itemNotes = draft.itemNotes || {};
     const rubric = rubricFor(h.type).map((r) => ({
+      key: r.key,
       nameZh: r.nameZh,
       nameEn: r.nameEn,
       score: scores[r.key] || 0,
-      max: 10
+      max: 10,
+      note: (itemNotes[r.key] || "").trim()
     }));
     const total = rubric.reduce((a, b) => a + b.score, 0);
     const max = rubric.length * 10;
     const badge = badgeFor(total, max);
+    const alreadyAwarded = Boolean(h.feedback && h.feedback.pointsAwarded);
+    const wasGraded = h.status === "graded";
     h.status = "graded";
     h.gradedAt = todayISO() + " " + nowTime();
     h.feedback = {
       by: "Amy Liu",
       comments,
-      tip,
+      tip: draft.tip || "",
+      itemNotes,
+      markers: normalizeMarkers(draft.markers).filter((m) => m.note),
       rubric,
       total,
       max,
-      badge
+      badge,
+      pointsAwarded: alreadyAwarded
     };
+    h.feedbackUnread = true;
     delete state.draftGrade[id];
-    if (h.studentId === "me") {
+    if (!alreadyAwarded && h.studentId === "me") {
       addPoints(20, "作业获批改「" + h.titleZh + "」", "Homework graded", true);
       if (badge === "优秀") addPoints(30, "作业获评优秀", "Homework rated excellent", true);
+      h.feedback.pointsAwarded = true;
+    } else if (!alreadyAwarded) {
+      h.feedback.pointsAwarded = true;
     }
     saveState();
-    showToast(h.studentId === "me" ? "已批改，学员积分已记上（示例）" : "已批改（示例）");
-    location.hash = "#teacher/queue";
+    if (wasGraded) showToast("反馈已更新");
+    else showToast(h.studentId === "me" ? "反馈已发送，学员积分已记上（示例）" : "反馈已发送（示例）");
+    renderApp();
+  }
+
+  function bindFeedbackPhotoEvents(hwId) {
+    const stage = $("#fb-stage");
+    bindPinLayout(stage);
+    if (!stage) return;
+    stage.addEventListener("click", (e) => {
+      if (e.target.closest(".fb-pin")) return;
+      const img = $("#fb-main-photo");
+      if (!img) return;
+      const id = hwId || (($("#grade-form") && $("#grade-form").getAttribute("data-id")) || "");
+      const idx = Number(img.getAttribute("data-index")) || 0;
+      const src = img.getAttribute("data-src") || img.src;
+      if (id && state.draftGrade[id] && state.draftGrade[id].markMode) {
+        const pt = pointToPercent(img, e.clientX, e.clientY);
+        if (!pt) {
+          showToast("请点在照片上");
+          return;
+        }
+        syncGradeFormToDraft(id);
+        const marker = { id: "mk-" + Date.now(), photoIndex: idx, x: pt.x, y: pt.y, note: "" };
+        state.draftGrade[id].markers = state.draftGrade[id].markers || [];
+        state.draftGrade[id].markers.push(marker);
+        openMarkerSheet(id, marker, true);
+        return;
+      }
+      const markers = id ? gradeDraftFor(id).markers : studentMarkersFromView();
+      openPhotoZoom(src, markers, idx);
+    });
+  }
+
+  function studentMarkersFromView() {
+    const route = parseRoute();
+    if (route.name !== "homework" || !route.id) return [];
+    const h = state.homework.find((x) => x.id === route.id);
+    return normalizeMarkers(h && h.feedback && h.feedback.markers);
   }
 
   function bindViewEvents(route) {
@@ -1888,6 +2269,10 @@
           submitGrade(form.getAttribute("data-id"));
         });
       }
+      bindFeedbackPhotoEvents(form && form.getAttribute("data-id"));
+    }
+    if (route.name === "homework" && route.id && route.id !== "new" && route.id !== "submit") {
+      bindFeedbackPhotoEvents(null);
     }
     if (route.name === "post") {
       const form = $("#comment-form");
@@ -2002,6 +2387,15 @@
     renderStatus();
     setActiveTab(route);
     bindViewEvents(route);
+    if ((route.mode || state.role) === "student" && route.name === "homework" && route.id && route.id !== "new" && route.id !== "submit") {
+      const hw = state.homework.find((x) => x.id === route.id);
+      if (hw && hw.studentId === "me" && hw.feedbackUnread) {
+        hw.feedbackUnread = false;
+        saveState();
+        renderTabbar(route);
+        setActiveTab(route);
+      }
+    }
   }
 
   document.addEventListener("click", (e) => {
@@ -2085,6 +2479,75 @@
       if (!area) return;
       const add = t.getAttribute("data-text") || "";
       area.value = area.value.trim() ? area.value.trim() + " " + add : add;
+    } else if (action === "save-grade-draft") {
+      e.preventDefault();
+      saveGradeDraft(t.getAttribute("data-id"));
+    } else if (action === "toggle-mark-mode") {
+      e.preventDefault();
+      const form = $("#grade-form");
+      const id = form && form.getAttribute("data-id");
+      if (!id) return;
+      syncGradeFormToDraft(id);
+      state.draftGrade[id].markMode = !state.draftGrade[id].markMode;
+      refreshFeedbackPhoto(id);
+    } else if (action === "fb-thumb") {
+      e.preventDefault();
+      const form = $("#grade-form");
+      const id = (form && form.getAttribute("data-id")) || null;
+      const idx = Number(t.getAttribute("data-index")) || 0;
+      if (id) {
+        syncGradeFormToDraft(id);
+        state.draftGrade[id].photoIndex = idx;
+        refreshFeedbackPhoto(id);
+      } else {
+        const card = $("#fb-photo-card");
+        const route = parseRoute();
+        const h = state.homework.find((x) => x.id === route.id);
+        if (!card || !h) return;
+        const markers = normalizeMarkers(h.feedback && h.feedback.markers);
+        card.outerHTML = renderFeedbackPhoto(h.photos, markers, idx, { interactive: false });
+        bindFeedbackPhotoEvents(null);
+      }
+    } else if (action === "zoom-photo") {
+      e.preventDefault();
+      const form = $("#grade-form");
+      const id = form && form.getAttribute("data-id");
+      const idx = Number(t.getAttribute("data-index")) || 0;
+      const src = t.getAttribute("data-src");
+      const markers = id ? gradeDraftFor(id).markers : studentMarkersFromView();
+      openPhotoZoom(src, markers, idx);
+    } else if (action === "edit-marker") {
+      e.preventDefault();
+      const form = $("#grade-form");
+      const id = form && form.getAttribute("data-id");
+      if (!id) return;
+      syncGradeFormToDraft(id);
+      const marker = (state.draftGrade[id].markers || []).find((m) => m.id === t.getAttribute("data-marker"));
+      if (marker) openMarkerSheet(id, marker, false);
+    } else if (action === "delete-marker" || action === "cancel-new-marker") {
+      e.preventDefault();
+      const form = $("#grade-form") || $("#marker-form");
+      const id = (form && form.getAttribute("data-id")) || ($("#grade-form") && $("#grade-form").getAttribute("data-id"));
+      const mk = t.getAttribute("data-marker");
+      if (!id || !mk) return;
+      syncGradeFormToDraft(id);
+      if (state.draftGrade[id]) {
+        state.draftGrade[id].markers = (state.draftGrade[id].markers || []).filter((m) => m.id !== mk);
+      }
+      if (pendingNewMarker && pendingNewMarker.id === mk) pendingNewMarker = null;
+      closeOverlay();
+      refreshFeedbackPhoto(id);
+      if (action === "delete-marker") showToast("标注已删除");
+    } else if (action === "show-marker-note") {
+      e.preventDefault();
+      const mid = t.getAttribute("data-marker");
+      const route = parseRoute();
+      let markers = [];
+      if (route.name === "grade") markers = gradeDraftFor(route.id).markers;
+      else markers = studentMarkersFromView();
+      const m = markers.find((x) => x.id === mid);
+      const n = markers.findIndex((x) => x.id === mid) + 1;
+      if (m && m.note) showToast(n + ". " + m.note);
     } else if (action === "rubric-delta") {
       e.preventDefault();
       const key = t.getAttribute("data-key");
@@ -2096,13 +2559,7 @@
     } else if (action === "view-photo") {
       e.preventDefault();
       const src = t.getAttribute("data-src");
-      openOverlay(`
-        <div class="sheet lightbox" role="dialog">
-          <div class="handle"></div>
-          <img src="${esc(src)}" alt="作业照片大图">
-          <button class="btn-ghost" type="button" data-action="close-overlay" style="margin-top:12px">关闭</button>
-        </div>
-      `);
+      openPhotoZoom(src, [], 0);
     }
   });
 
