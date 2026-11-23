@@ -232,9 +232,8 @@ window.AMYL_DATA = {
       },
       flavours: {
         tags: [
-          { id: "floral-black-tea", cat: "floral", nameZh: "红茶" },
-          { id: "fruity-lemon", cat: "fruity", nameZh: "柠檬" },
-          { id: "fruity-orange", cat: "fruity", nameZh: "橙" }
+          { id: "floral", cat: "floral", nameZh: "花香" },
+          { id: "fruity", cat: "fruity", nameZh: "果香" }
         ],
         custom: [],
         acidity: 4,
@@ -304,10 +303,9 @@ window.AMYL_DATA = {
       },
       flavours: {
         tags: [
-          { id: "floral-black-tea", cat: "floral", nameZh: "红茶" },
-          { id: "fruity-grapefruit", cat: "fruity", nameZh: "西柚" },
-          { id: "fruity-lemon", cat: "fruity", nameZh: "柠檬" },
-          { id: "sweet-honey", cat: "sweet", nameZh: "蜂蜜" }
+          { id: "floral", cat: "floral", nameZh: "花香" },
+          { id: "fruity", cat: "fruity", nameZh: "果香" },
+          { id: "sweet", cat: "sweet", nameZh: "甘甜" }
         ],
         custom: [],
         acidity: 4,
@@ -494,185 +492,19 @@ window.AMYL_DATA = {
 
 
   flavorWheel: {
-    sourceZh: "风味选项依据 SCA 与 WCR 的咖啡风味轮整理。",
+    sourceZh: "风味选项依据 SCA 与 WCR 的咖啡风味轮大类整理。",
     categories: [
-      {
-        id: "floral",
-        nameZh: "花香",
-        groups: [
-          { nameZh: "", items: [
-            { id: "floral-black-tea", nameZh: "红茶" },
-            { id: "floral-chamomile", nameZh: "洋甘菊" },
-            { id: "floral-rose", nameZh: "玫瑰" },
-            { id: "floral-jasmine", nameZh: "茉莉" }
-          ]}
-        ]
-      },
-      {
-        id: "fruity",
-        nameZh: "果香",
-        groups: [
-          { nameZh: "浆果", items: [
-            { id: "fruity-blackberry", nameZh: "黑莓" },
-            { id: "fruity-raspberry", nameZh: "覆盆子" },
-            { id: "fruity-blueberry", nameZh: "蓝莓" },
-            { id: "fruity-strawberry", nameZh: "草莓" }
-          ]},
-          { nameZh: "干果", items: [
-            { id: "fruity-raisin", nameZh: "葡萄干" },
-            { id: "fruity-prune", nameZh: "西梅" }
-          ]},
-          { nameZh: "其他水果", items: [
-            { id: "fruity-coconut", nameZh: "椰子" },
-            { id: "fruity-cherry", nameZh: "樱桃" },
-            { id: "fruity-pomegranate", nameZh: "石榴" },
-            { id: "fruity-pineapple", nameZh: "菠萝" },
-            { id: "fruity-grape", nameZh: "葡萄" },
-            { id: "fruity-apple", nameZh: "苹果" },
-            { id: "fruity-peach", nameZh: "桃" },
-            { id: "fruity-pear", nameZh: "梨" }
-          ]},
-          { nameZh: "柑橘", items: [
-            { id: "fruity-grapefruit", nameZh: "西柚" },
-            { id: "fruity-orange", nameZh: "橙" },
-            { id: "fruity-lemon", nameZh: "柠檬" },
-            { id: "fruity-lime", nameZh: "青柠" }
-          ]}
-        ]
-      },
-      {
-        id: "sour",
-        nameZh: "酸质/发酵",
-        groups: [
-          { nameZh: "酸质", items: [
-            { id: "sour-aromatics", nameZh: "酸香" },
-            { id: "sour-acetic", nameZh: "醋酸" },
-            { id: "sour-butyric", nameZh: "丁酸" },
-            { id: "sour-isovaleric", nameZh: "异戊酸" },
-            { id: "sour-citric", nameZh: "柠檬酸" },
-            { id: "sour-malic", nameZh: "苹果酸" }
-          ]},
-          { nameZh: "发酵", items: [
-            { id: "sour-winey", nameZh: "酒香" },
-            { id: "sour-whiskey", nameZh: "威士忌" },
-            { id: "sour-fermented", nameZh: "发酵" },
-            { id: "sour-overripe", nameZh: "过熟" }
-          ]}
-        ]
-      },
-      {
-        id: "green",
-        nameZh: "绿/草本",
-        groups: [
-          { nameZh: "", items: [
-            { id: "green-olive-oil", nameZh: "橄榄油" },
-            { id: "green-raw", nameZh: "生青" },
-            { id: "green-underripe", nameZh: "未熟" },
-            { id: "green-peapod", nameZh: "豆荚" },
-            { id: "green-fresh", nameZh: "新鲜" },
-            { id: "green-dark", nameZh: "深绿" },
-            { id: "green-vegetative", nameZh: "植物" },
-            { id: "green-hay", nameZh: "干草" },
-            { id: "green-herb", nameZh: "草本" },
-            { id: "green-beany", nameZh: "豆味" }
-          ]}
-        ]
-      },
-      {
-        id: "other",
-        nameZh: "其他风味",
-        groups: [
-          { nameZh: "纸质/霉味", items: [
-            { id: "other-stale", nameZh: "陈旧" },
-            { id: "other-cardboard", nameZh: "纸板" },
-            { id: "other-papery", nameZh: "纸质" },
-            { id: "other-woody", nameZh: "木质" },
-            { id: "other-moldy", nameZh: "霉湿" },
-            { id: "other-dusty", nameZh: "尘霉" },
-            { id: "other-earthy", nameZh: "泥土" }
-          ]},
-          { nameZh: "化学", items: [
-            { id: "other-medicinal", nameZh: "药味" },
-            { id: "other-petroleum", nameZh: "石油味" },
-            { id: "other-skunky", nameZh: "臭鼬" },
-            { id: "other-rubber", nameZh: "橡胶" },
-            { id: "other-bitter", nameZh: "苦味" },
-            { id: "other-salty", nameZh: "咸味" },
-            { id: "other-phenolic", nameZh: "酚味" }
-          ]},
-          { nameZh: "其他", items: [
-            { id: "other-animalic", nameZh: "动物感" },
-            { id: "other-brothy", nameZh: "肉汤" }
-          ]}
-        ]
-      },
-      {
-        id: "roasted",
-        nameZh: "烘焙",
-        groups: [
-          { nameZh: "谷物", items: [
-            { id: "roasted-grain", nameZh: "谷物" },
-            { id: "roasted-malt", nameZh: "麦芽" }
-          ]},
-          { nameZh: "焦苦", items: [
-            { id: "roasted-brown", nameZh: "褐色烘焙" },
-            { id: "roasted-acrid", nameZh: "刺激" },
-            { id: "roasted-ashy", nameZh: "灰感" },
-            { id: "roasted-smoky", nameZh: "烟熏" }
-          ]},
-          { nameZh: "烟草", items: [
-            { id: "roasted-pipe", nameZh: "烟斗烟草" },
-            { id: "roasted-tobacco", nameZh: "烟草" }
-          ]}
-        ]
-      },
-      {
-        id: "spices",
-        nameZh: "香料",
-        groups: [
-          { nameZh: "", items: [
-            { id: "spices-pepper", nameZh: "胡椒" },
-            { id: "spices-anise", nameZh: "茴香" },
-            { id: "spices-nutmeg", nameZh: "肉豆蔻" },
-            { id: "spices-cinnamon", nameZh: "肉桂" },
-            { id: "spices-clove", nameZh: "丁香" }
-          ]}
-        ]
-      },
-      {
-        id: "nutty",
-        nameZh: "坚果/可可",
-        groups: [
-          { nameZh: "坚果", items: [
-            { id: "nutty-peanut", nameZh: "花生" },
-            { id: "nutty-hazelnut", nameZh: "榛子" },
-            { id: "nutty-almond", nameZh: "杏仁" }
-          ]},
-          { nameZh: "可可", items: [
-            { id: "nutty-chocolate", nameZh: "巧克力" },
-            { id: "nutty-dark-chocolate", nameZh: "黑巧克力" }
-          ]}
-        ]
-      },
-      {
-        id: "sweet",
-        nameZh: "甘甜",
-        groups: [
-          { nameZh: "糖香", items: [
-            { id: "sweet-molasses", nameZh: "糖蜜" },
-            { id: "sweet-maple", nameZh: "枫糖" },
-            { id: "sweet-caramel", nameZh: "焦糖" },
-            { id: "sweet-honey", nameZh: "蜂蜜" }
-          ]},
-          { nameZh: "甜感", items: [
-            { id: "sweet-vanilla", nameZh: "香草" },
-            { id: "sweet-vanillin", nameZh: "香兰素" },
-            { id: "sweet-overall", nameZh: "总体甜" },
-            { id: "sweet-aromatics", nameZh: "甜香" }
-          ]}
-        ]
-      }
+      { id: "floral", nameZh: "花香" },
+      { id: "fruity", nameZh: "果香" },
+      { id: "sour", nameZh: "酸质/发酵" },
+      { id: "green", nameZh: "绿/草本" },
+      { id: "other", nameZh: "其他风味" },
+      { id: "roasted", nameZh: "烘焙" },
+      { id: "spices", nameZh: "香料" },
+      { id: "nutty", nameZh: "坚果/可可" },
+      { id: "sweet", nameZh: "甘甜" }
     ]
   },
+
   categories: ["全部", "手冲", "器具", "豆子", "作业分享", "问答"]
 };

@@ -410,55 +410,80 @@
     return (DATA.flavorWheel && DATA.flavorWheel.categories) || [];
   }
 
-  function flavorItemById(id) {
+  function flavorCategoryById(id) {
+    if (!id) return null;
     const cats = flavorWheel();
-    for (let i = 0; i < cats.length; i++) {
-      const groups = cats[i].groups || [];
-      for (let g = 0; g < groups.length; g++) {
-        const items = groups[g].items || [];
-        for (let k = 0; k < items.length; k++) {
-          if (items[k].id === id) return { cat: cats[i].id, nameZh: items[k].nameZh, id: items[k].id };
-        }
+    const direct = cats.find((c) => c.id === id);
+    if (direct) return { id: direct.id, cat: direct.id, nameZh: direct.nameZh };
+    const prefixes = [
+      ["floral", "floral"],
+      ["fruity", "fruity"],
+      ["sour", "sour"],
+      ["green", "green"],
+      ["other", "other"],
+      ["roasted", "roasted"],
+      ["spices", "spices"],
+      ["nutty", "nutty"],
+      ["sweet", "sweet"]
+    ];
+    const raw = String(id);
+    for (let i = 0; i < prefixes.length; i++) {
+      const pre = prefixes[i][0];
+      if (raw === pre || raw.indexOf(pre + "-") === 0) {
+        const cat = cats.find((c) => c.id === prefixes[i][1]);
+        if (cat) return { id: cat.id, cat: cat.id, nameZh: cat.nameZh };
       }
     }
-    return null;
+    const byName = cats.find((c) => c.nameZh === raw);
+    return byName ? { id: byName.id, cat: byName.id, nameZh: byName.nameZh } : null;
   }
 
   function normalizeFlavours(raw) {
     const base = emptyFlavours();
     if (!raw || typeof raw !== "object") return base;
-    const tags = Array.isArray(raw.tags)
-      ? raw.tags
-          .map((t) => {
-            if (!t) return null;
-            if (typeof t === "string") {
-              const found = flavorItemById(t);
-              return found || { id: t, cat: "custom", nameZh: t };
-            }
-            const found = t.id ? flavorItemById(t.id) : null;
-            return {
-              id: String(t.id || t.nameZh || ""),
-              cat: String((found && found.cat) || t.cat || ""),
-              nameZh: String((found && found.nameZh) || t.nameZh || t.id || "")
-            };
-          })
-          .filter((t) => t && t.nameZh)
-      : [];
+    const seen = {};
+    const tags = [];
+    const extraCustom = [];
+    (Array.isArray(raw.tags) ? raw.tags : []).forEach((t) => {
+      if (!t) return;
+      if (typeof t === "string") {
+        const found = flavorCategoryById(t);
+        if (found) {
+          if (!seen[found.id]) {
+            seen[found.id] = true;
+            tags.push(found);
+          }
+        } else if (t.trim()) extraCustom.push(t.trim());
+        return;
+      }
+      const found = flavorCategoryById(t.id) || flavorCategoryById(t.cat) || flavorCategoryById(t.nameZh);
+      if (found) {
+        if (!seen[found.id]) {
+          seen[found.id] = true;
+          tags.push(found);
+        }
+      } else if (t.nameZh && String(t.nameZh).trim()) {
+        extraCustom.push(String(t.nameZh).trim());
+      }
+    });
     const scale = (v) => {
       const n = parseNum(v);
       if (n == null) return "";
       return Math.max(1, Math.min(5, Math.round(n)));
     };
     const finish = String(raw.finish || "");
+    const custom = Array.isArray(raw.custom) ? raw.custom.map((x) => String(x || "").trim()).filter(Boolean) : [];
+    extraCustom.forEach((x) => {
+      if (custom.indexOf(x) === -1) custom.push(x);
+    });
     return {
       tags,
-      custom: Array.isArray(raw.custom) ? raw.custom.map((x) => String(x || "").trim()).filter(Boolean) : [],
+      custom,
       acidity: scale(raw.acidity),
       sweetness: scale(raw.sweetness),
       bitterness: scale(raw.bitterness),
       body: scale(raw.body),
-      finish: finish === "短" || finish === "中" || finish === "长" ? finish : "",
-      openCat: String(raw.openCat || "")
+      finish: finish === "短" || finish === "中" || finish === "长" ? finish : ""
     };
   }
 
@@ -648,31 +673,10 @@
   function renderFlavourPicker(flavours) {
     const f = normalizeFlavours(flavours);
     const cats = flavorWheel();
-    const open = f.openCat || "";
-    const selectedIds = {};
-    f.tags.forEach((t) => {
-      selectedIds[t.id] = true;
-    });
     const selected = f.tags
       .map((t) => `<button type="button" class="flavor-chip on" data-action="remove-flavor" data-id="${esc(t.id)}">${esc(t.nameZh)} ×</button>`)
       .concat(f.custom.map((t, i) => `<button type="button" class="flavor-chip on custom" data-action="remove-custom-flavor" data-index="${i}">${esc(t)} ×</button>`))
       .join("");
-    const openCat = cats.find((c) => c.id === open);
-    const sub = openCat
-      ? `<div class="flavor-subs" data-testid="flavor-subs">
-          ${(openCat.groups || [])
-            .map((g) => {
-              const items = (g.items || [])
-                .map((it) => {
-                  const on = selectedIds[it.id] ? " on" : "";
-                  return `<button type="button" class="flavor-chip${on}" data-action="toggle-flavor" data-id="${esc(it.id)}" data-cat="${esc(openCat.id)}">${esc(it.nameZh)}</button>`;
-                })
-                .join("");
-              return `${g.nameZh ? `<p class="tiny flavor-group">${esc(g.nameZh)}</p>` : ""}<div class="flavor-chips">${items}</div>`;
-            })
-            .join("")}
-        </div>`
-      : `<p class="sub flavor-hint">先点一个大类，再选你尝到的味道。可多选。</p>`;
     const scaleRow = (name, key, val) => `<div class="scale-row">
         <span>${esc(name)}</span>
         <div class="scale-pips" role="radiogroup" aria-label="${esc(name)}">
@@ -683,16 +687,16 @@
       </div>`;
     return `<div class="flavor-picker" id="flavor-picker" data-testid="flavor-picker">
       <p class="tiny flavor-source">${esc((DATA.flavorWheel && DATA.flavorWheel.sourceZh) || "")}</p>
+      <p class="sub flavor-hint">点选你认为喝到的风味大类，可多选。</p>
       <div class="flavor-selected" data-testid="flavor-selected">${selected || `<span class="sub">还没有选风味</span>`}</div>
-      <div class="flavor-cats">
+      <div class="flavor-cats" data-testid="flavor-cats">
         ${cats
           .map((c) => {
-            const has = f.tags.some((t) => t.cat === c.id);
-            return `<button type="button" class="flavor-cat ${open === c.id ? "on" : ""} ${has ? "has" : ""}" data-action="flavor-cat" data-id="${esc(c.id)}">${esc(c.nameZh)}</button>`;
+            const on = f.tags.some((t) => t.id === c.id);
+            return `<button type="button" class="flavor-cat ${on ? "on" : ""}" data-action="toggle-flavor-cat" data-id="${esc(c.id)}" data-testid="flavor-cat-${esc(c.id)}">${esc(c.nameZh)}</button>`;
           })
           .join("")}
       </div>
-      ${sub}
       <div class="flavor-custom">
         <input id="flavor-custom-input" maxlength="20" placeholder="其他，自己写" data-testid="flavor-custom">
         <button type="button" class="fb-mode" data-action="add-custom-flavor">添加</button>
@@ -2886,7 +2890,6 @@
               return;
             }
             flavours = normalizeFlavours(state.draftHw.flavours);
-            flavours.openCat = "";
           }
           const notesRaw = String(fd.get("notes") || "").trim();
           const notes = notesRaw ? notesRaw + "（示例提交，仅本地可见）" : "";
@@ -3143,25 +3146,15 @@
         state.draftHw.pours = list;
       }
       refreshBrewFlavourAndPours();
-    } else if (action === "flavor-cat") {
+    } else if (action === "toggle-flavor-cat") {
       e.preventDefault();
       collectBrewDraftFromForm();
-      const id = t.getAttribute("data-id");
-      const f = normalizeFlavours(state.draftHw.flavours);
-      f.openCat = f.openCat === id ? "" : id;
-      state.draftHw.flavours = f;
-      refreshBrewFlavourAndPours();
-    } else if (action === "toggle-flavor") {
-      e.preventDefault();
-      collectBrewDraftFromForm();
-      const id = t.getAttribute("data-id");
-      const found = flavorItemById(id);
+      const found = flavorCategoryById(t.getAttribute("data-id"));
       if (!found) return;
       const f = normalizeFlavours(state.draftHw.flavours);
-      const exists = f.tags.findIndex((x) => x.id === id);
+      const exists = f.tags.findIndex((x) => x.id === found.id);
       if (exists >= 0) f.tags.splice(exists, 1);
       else f.tags.push(found);
-      f.openCat = found.cat;
       state.draftHw.flavours = f;
       refreshBrewFlavourAndPours();
     } else if (action === "remove-flavor") {
