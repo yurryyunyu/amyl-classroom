@@ -87,11 +87,16 @@
 
   function normalizeHomeworkItem(h) {
     const photos = (h.photos && h.photos.length) ? h.photos.slice() : (h.photo ? [h.photo] : []);
+    const type = h.type === "latte" ? "latte" : "brew";
+    const paramsRaw = Object.assign({}, h.params || {});
+    const flavoursRaw = h.flavours || paramsRaw.flavours;
+    if (paramsRaw.flavours) delete paramsRaw.flavours;
     const item = Object.assign({}, h, {
       photos,
       photo: photos[0] || h.photo || "",
-      params: Object.assign({}, h.params || {}),
-      type: h.type === "latte" ? "latte" : "brew",
+      params: type === "brew" ? normalizeBrewParams(paramsRaw) : paramsRaw,
+      flavours: type === "brew" ? normalizeFlavours(flavoursRaw) : (h.flavours || null),
+      type,
       studentId: h.studentId || "me",
       studentName: h.studentName || (h.studentId && DATA.authors[h.studentId] ? DATA.authors[h.studentId].name : DATA.user.name),
       feedbackUnread: h.feedbackUnread === true
@@ -131,7 +136,7 @@
       teacherTypeFilter: "all",
       filterCourse: "全部",
       filterTag: "全部",
-      draftHw: { type: null, dose: "15g", water: "250g", ratio: "1:16.7", grind: "", time: "", dripper: "V60", notes: "", photos: [], pattern: "心形", cupSize: "180ml", milkType: "全脂", milkTemp: "55–60°C" },
+      draftHw: emptyDraftHw(),
       draftGrade: {},
       draftPost: { tag: "手冲", title: "", body: "" }
     };
@@ -144,7 +149,10 @@
       if (!raw) return base;
       const saved = JSON.parse(raw);
       const merged = Object.assign(base, saved, {
-        draftHw: Object.assign(base.draftHw, saved.draftHw || {}),
+        draftHw: Object.assign(base.draftHw, saved.draftHw || {}, {
+          flavours: normalizeFlavours((saved.draftHw && saved.draftHw.flavours) || base.draftHw.flavours),
+          pours: (saved.draftHw && Array.isArray(saved.draftHw.pours) && saved.draftHw.pours.length) ? saved.draftHw.pours : base.draftHw.pours
+        }),
         draftGrade: Object.assign({}, saved.draftGrade || {}),
         draftPost: Object.assign(base.draftPost, saved.draftPost || {})
       });
@@ -176,7 +184,8 @@
           role: state.role,
           teacherFilter: state.teacherFilter,
           teacherTypeFilter: state.teacherTypeFilter,
-          draftGrade: state.draftGrade || {}
+          draftGrade: state.draftGrade || {},
+          draftHw: state.draftHw || emptyDraftHw()
         })
       );
     } catch (e) { /* ignore quota */ }
@@ -312,9 +321,652 @@
     return `<span class="tag-type ${t.id === "latte" ? "latte" : "brew"}">${esc(t.nameZh)}</span>`;
   }
 
-  function emptyDraftHw() {
-    return { type: null, dose: "15g", water: "250g", ratio: "1:16.7", grind: "", time: "", dripper: "V60", notes: "", photos: [], pattern: "心形", cupSize: "180ml", milkType: "全脂", milkTemp: "55–60°C" };
+  function emptyFlavours() {
+    return { tags: [], custom: [], acidity: "", sweetness: "", bitterness: "", body: "", finish: "", openCat: "" };
   }
+
+  function emptyDraftHw() {
+    return {
+      type: null,
+      pattern: "心形",
+      cupSize: "180ml",
+      milkType: "全脂",
+      milkTemp: "55–60°C",
+      beanName: "",
+      process: "",
+      processOther: "",
+      roastLevel: "",
+      roastDate: "",
+      dripper: "V60",
+      dripperOther: "",
+      filter: "",
+      grinder: "",
+      grind: "",
+      dose: "",
+      water: "",
+      ratio: "",
+      temp: "",
+      waterType: "",
+      tdsWater: "",
+      bloomWater: "",
+      bloomTime: "",
+      pours: [{ water: "", time: "" }],
+      pourMethod: "",
+      pourMethodOther: "",
+      agitation: "",
+      time: "",
+      beverageWeight: "",
+      tds: "",
+      ey: "",
+      notes: "",
+      photos: [],
+      flavours: emptyFlavours()
+    };
+  }
+
+  function parseNum(v) {
+    if (v == null || v === "") return null;
+    const m = String(v).replace(/,/g, "").match(/-?\d+(\.\d+)?/);
+    return m ? Number(m[0]) : null;
+  }
+
+  function formatRatio(dose, water) {
+    const d = parseNum(dose);
+    const w = parseNum(water);
+    if (!d || d <= 0 || w == null || w < 0) return "";
+    const r = w / d;
+    const rounded = Math.round(r * 10) / 10;
+    const s = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    return "1:" + s;
+  }
+
+  function formatEY(dose, bev, tds) {
+    const d = parseNum(dose);
+    const b = parseNum(bev);
+    const t = parseNum(tds);
+    if (!d || d <= 0 || !b || b <= 0 || t == null || t < 0) return "";
+    const ey = (b * t) / d;
+    return (Math.round(ey * 10) / 10).toFixed(1);
+  }
+
+  function validBrewTime(v) {
+    const s = String(v || "").trim();
+    return /^\d{1,2}:[0-5]\d$/.test(s);
+  }
+
+  function roastAgeText(dateStr) {
+    if (!dateStr) return "";
+    const today = todayISO();
+    const a = Date.parse(dateStr + "T00:00:00+08:00");
+    const b = Date.parse(today + "T00:00:00+08:00");
+    if (!isFinite(a) || !isFinite(b)) return "";
+    const days = Math.round((b - a) / 86400000);
+    if (days < 0) return "烘焙日期在今天之后";
+    if (days === 0) return "今天烘焙";
+    return "烘焙后 " + days + " 天";
+  }
+
+  function flavorWheel() {
+    return (DATA.flavorWheel && DATA.flavorWheel.categories) || [];
+  }
+
+  function flavorItemById(id) {
+    const cats = flavorWheel();
+    for (let i = 0; i < cats.length; i++) {
+      const groups = cats[i].groups || [];
+      for (let g = 0; g < groups.length; g++) {
+        const items = groups[g].items || [];
+        for (let k = 0; k < items.length; k++) {
+          if (items[k].id === id) return { cat: cats[i].id, nameZh: items[k].nameZh, id: items[k].id };
+        }
+      }
+    }
+    return null;
+  }
+
+  function normalizeFlavours(raw) {
+    const base = emptyFlavours();
+    if (!raw || typeof raw !== "object") return base;
+    const tags = Array.isArray(raw.tags)
+      ? raw.tags
+          .map((t) => {
+            if (!t) return null;
+            if (typeof t === "string") {
+              const found = flavorItemById(t);
+              return found || { id: t, cat: "custom", nameZh: t };
+            }
+            const found = t.id ? flavorItemById(t.id) : null;
+            return {
+              id: String(t.id || t.nameZh || ""),
+              cat: String((found && found.cat) || t.cat || ""),
+              nameZh: String((found && found.nameZh) || t.nameZh || t.id || "")
+            };
+          })
+          .filter((t) => t && t.nameZh)
+      : [];
+    const scale = (v) => {
+      const n = parseNum(v);
+      if (n == null) return "";
+      return Math.max(1, Math.min(5, Math.round(n)));
+    };
+    const finish = String(raw.finish || "");
+    return {
+      tags,
+      custom: Array.isArray(raw.custom) ? raw.custom.map((x) => String(x || "").trim()).filter(Boolean) : [],
+      acidity: scale(raw.acidity),
+      sweetness: scale(raw.sweetness),
+      bitterness: scale(raw.bitterness),
+      body: scale(raw.body),
+      finish: finish === "短" || finish === "中" || finish === "长" ? finish : "",
+      openCat: String(raw.openCat || "")
+    };
+  }
+
+  function normalizePours(list) {
+    if (!Array.isArray(list) || !list.length) return [];
+    return list
+      .map((p) => ({
+        water: p && p.water != null ? String(p.water).trim() : "",
+        time: p && p.time != null ? String(p.time).trim() : ""
+      }))
+      .filter((p) => p.water || p.time);
+  }
+
+  function normalizeBrewParams(p) {
+    const src = p && typeof p === "object" ? p : {};
+    const out = Object.assign({}, src);
+    if (out.pours) out.pours = normalizePours(out.pours);
+    if (out.ratio == null || out.ratio === "") {
+      const auto = formatRatio(out.dose, out.water);
+      if (auto) out.ratio = auto;
+    }
+    if (out.ey == null || out.ey === "") {
+      const auto = formatEY(out.dose, out.beverageWeight, out.tds);
+      if (auto) out.ey = auto;
+    }
+    return out;
+  }
+
+  function displayVal(v, unit) {
+    if (v == null || String(v).trim() === "") return "";
+    const s = String(v).trim();
+    if (!unit) return s;
+    if (s.endsWith(unit) || s.indexOf(unit) !== -1) return s;
+    return s + " " + unit;
+  }
+
+  function recipeCell(label, value, unit) {
+    const filled = value != null && String(value).trim() !== "";
+    const text = filled ? displayVal(value, unit) : "未填";
+    return `<div class="recipe-cell ${filled ? "" : "is-empty"}"><span class="tiny">${esc(label)}</span><div>${esc(text)}</div></div>`;
+  }
+
+  function scaleLabel(v) {
+    return v === "" || v == null ? "未填" : String(v);
+  }
+
+  function renderFlavourView(flavours, opts) {
+    const f = normalizeFlavours(flavours);
+    const hasTags = f.tags.length || f.custom.length;
+    const hasScale = f.acidity || f.sweetness || f.bitterness || f.body || f.finish;
+    if (!hasTags && !hasScale) {
+      return `<section class="flavor-card" data-testid="flavor-card">
+        <h3>风味</h3>
+        <p class="sub">未填</p>
+      </section>`;
+    }
+    const chips = f.tags
+      .map((t) => `<span class="flavor-chip on static">${esc(t.nameZh)}</span>`)
+      .concat(f.custom.map((t) => `<span class="flavor-chip on static custom">${esc(t)}</span>`))
+      .join("");
+    return `<section class="flavor-card" data-testid="flavor-card">
+      <h3>风味</h3>
+      <p class="tiny flavor-source">${esc((DATA.flavorWheel && DATA.flavorWheel.sourceZh) || "风味选项依据 SCA 与 WCR 的咖啡风味轮整理。")}</p>
+      ${hasTags ? `<div class="flavor-selected">${chips}</div>` : `<p class="sub">还没有选风味。</p>`}
+      <div class="flavor-scales">
+        <div><span>酸度</span><strong>${esc(scaleLabel(f.acidity))}</strong></div>
+        <div><span>甜度</span><strong>${esc(scaleLabel(f.sweetness))}</strong></div>
+        <div><span>苦度</span><strong>${esc(scaleLabel(f.bitterness))}</strong></div>
+        <div><span>醇厚度</span><strong>${esc(scaleLabel(f.body))}</strong></div>
+        <div><span>余韵</span><strong>${esc(f.finish || "未填")}</strong></div>
+      </div>
+    </section>`;
+  }
+
+  function renderBrewRecipeCard(h) {
+    const p = normalizeBrewParams((h && h.params) || {});
+    const dripper = p.dripper === "其他" && p.dripperOther ? p.dripper + " · " + p.dripperOther : p.dripper;
+    const process = p.process === "其他" && p.processOther ? p.process + " · " + p.processOther : p.process;
+    const pourMethod = p.pourMethod === "其他" && p.pourMethodOther ? p.pourMethod + " · " + p.pourMethodOther : p.pourMethod;
+    const ratio = p.ratio || formatRatio(p.dose, p.water);
+    const ey = p.ey || formatEY(p.dose, p.beverageWeight, p.tds);
+    const age = roastAgeText(p.roastDate);
+    const roast = [p.roastDate, age].filter(Boolean).join(" · ");
+    const pours = normalizePours(p.pours);
+    const pourLines = pours.length
+      ? pours
+          .map((row, i) => {
+            const w = row.water ? displayVal(row.water, "g") : "未填";
+            const t = row.time || "未填";
+            return `<li>第 ${i + 1} 段 ${esc(w)} @ ${esc(t)}</li>`;
+          })
+          .join("")
+      : `<li class="is-empty">未填</li>`;
+    return `<section class="recipe-card" data-testid="recipe-card">
+      <h3>冲煮记录</h3>
+      <div class="recipe-block">
+        <h4>豆子</h4>
+        <div class="form-grid">
+          ${recipeCell("名称/产区", p.beanName)}
+          ${recipeCell("处理法", process)}
+          ${recipeCell("烘焙度", p.roastLevel)}
+          ${recipeCell("烘焙日期", roast)}
+        </div>
+      </div>
+      <div class="recipe-block">
+        <h4>器具</h4>
+        <div class="form-grid">
+          ${recipeCell("滤杯", dripper)}
+          ${recipeCell("滤纸", p.filter)}
+          ${recipeCell("磨豆机", p.grinder)}
+          ${recipeCell("刻度", p.grind)}
+        </div>
+      </div>
+      <div class="recipe-block">
+        <h4>粉水与温度</h4>
+        <div class="form-grid">
+          ${recipeCell("粉量", p.dose, "g")}
+          ${recipeCell("总水量", p.water, "g")}
+          ${recipeCell("粉水比", ratio)}
+          ${recipeCell("水温", p.temp, "°C")}
+          ${recipeCell("用水", p.waterType)}
+          ${recipeCell("水质 TDS", p.tdsWater, "ppm")}
+        </div>
+      </div>
+      <div class="recipe-block">
+        <h4>闷蒸</h4>
+        <div class="form-grid">
+          ${recipeCell("闷蒸水量", p.bloomWater, "g")}
+          ${recipeCell("闷蒸时间", p.bloomTime, "s")}
+        </div>
+      </div>
+      <div class="recipe-block">
+        <h4>注水</h4>
+        <div class="form-grid">
+          ${recipeCell("段数", pours.length ? String(pours.length) : "")}
+          ${recipeCell("注水方式", pourMethod)}
+          ${recipeCell("扰动", p.agitation)}
+        </div>
+        <ul class="pour-view">${pourLines}</ul>
+      </div>
+      <div class="recipe-block">
+        <h4>萃取</h4>
+        <div class="form-grid">
+          ${recipeCell("总萃取时间", p.time)}
+          ${recipeCell("萃取液重量", p.beverageWeight, "g")}
+          ${recipeCell("TDS", p.tds, "%")}
+          ${recipeCell("萃取率", ey, "%")}
+        </div>
+      </div>
+    </section>`;
+  }
+
+  function unitInput(name, value, unit, opts) {
+    const o = opts || {};
+    const req = o.required ? "required-mark" : "";
+    const type = o.time ? "text" : "text";
+    const mode = o.time ? "numeric" : "decimal";
+    const ph = o.placeholder || "";
+    const test = o.test ? ` data-testid="${esc(o.test)}"` : "";
+    return `<div class="field unit-field">
+      <label class="${req}">${esc(o.label || "")}${o.required ? `<span class="req">必填</span>` : ""}</label>
+      <div class="unit-wrap">
+        <input name="${esc(name)}" value="${esc(value || "")}" inputmode="${mode}" placeholder="${esc(ph)}" autocomplete="off"${test} ${o.required ? `aria-required="true"` : ""}>
+        ${unit ? `<span class="unit">${esc(unit)}</span>` : ""}
+      </div>
+    </div>`;
+  }
+
+  function renderPourRows(pours) {
+    const list = pours && pours.length ? pours : [{ water: "", time: "" }];
+    return `<div id="pour-list" class="pour-list" data-testid="pour-list">
+      ${list
+        .map(
+          (p, i) => `<div class="pour-row" data-index="${i}">
+            <span class="pour-n">第 ${i + 1} 段</span>
+            <div class="unit-wrap"><input name="pour-water-${i}" value="${esc(p.water || "")}" inputmode="decimal" placeholder="累计水量" aria-label="第 ${i + 1} 段累计水量"><span class="unit">g</span></div>
+            <div class="unit-wrap"><input name="pour-time-${i}" value="${esc(p.time || "")}" inputmode="numeric" placeholder="1:15" aria-label="第 ${i + 1} 段时间"></div>
+            <button type="button" class="fb-mini" data-action="remove-pour" data-index="${i}" aria-label="删除第 ${i + 1} 段">删</button>
+          </div>`
+        )
+        .join("")}
+    </div>
+    <p class="tiny" id="pour-count">共 ${list.length} 段</p>
+    <button type="button" class="fb-mode" data-action="add-pour" data-testid="add-pour">加一段注水</button>`;
+  }
+
+  function renderFlavourPicker(flavours) {
+    const f = normalizeFlavours(flavours);
+    const cats = flavorWheel();
+    const open = f.openCat || "";
+    const selectedIds = {};
+    f.tags.forEach((t) => {
+      selectedIds[t.id] = true;
+    });
+    const selected = f.tags
+      .map((t) => `<button type="button" class="flavor-chip on" data-action="remove-flavor" data-id="${esc(t.id)}">${esc(t.nameZh)} ×</button>`)
+      .concat(f.custom.map((t, i) => `<button type="button" class="flavor-chip on custom" data-action="remove-custom-flavor" data-index="${i}">${esc(t)} ×</button>`))
+      .join("");
+    const openCat = cats.find((c) => c.id === open);
+    const sub = openCat
+      ? `<div class="flavor-subs" data-testid="flavor-subs">
+          ${(openCat.groups || [])
+            .map((g) => {
+              const items = (g.items || [])
+                .map((it) => {
+                  const on = selectedIds[it.id] ? " on" : "";
+                  return `<button type="button" class="flavor-chip${on}" data-action="toggle-flavor" data-id="${esc(it.id)}" data-cat="${esc(openCat.id)}">${esc(it.nameZh)}</button>`;
+                })
+                .join("");
+              return `${g.nameZh ? `<p class="tiny flavor-group">${esc(g.nameZh)}</p>` : ""}<div class="flavor-chips">${items}</div>`;
+            })
+            .join("")}
+        </div>`
+      : `<p class="sub flavor-hint">先点一个大类，再选你尝到的味道。可多选。</p>`;
+    const scaleRow = (name, key, val) => `<div class="scale-row">
+        <span>${esc(name)}</span>
+        <div class="scale-pips" role="radiogroup" aria-label="${esc(name)}">
+          ${[1, 2, 3, 4, 5]
+            .map((n) => `<button type="button" class="scale-pip ${val === n ? "on" : ""}" data-action="set-scale" data-key="${esc(key)}" data-value="${n}">${n}</button>`)
+            .join("")}
+        </div>
+      </div>`;
+    return `<div class="flavor-picker" id="flavor-picker" data-testid="flavor-picker">
+      <p class="tiny flavor-source">${esc((DATA.flavorWheel && DATA.flavorWheel.sourceZh) || "")}</p>
+      <div class="flavor-selected" data-testid="flavor-selected">${selected || `<span class="sub">还没有选风味</span>`}</div>
+      <div class="flavor-cats">
+        ${cats
+          .map((c) => {
+            const has = f.tags.some((t) => t.cat === c.id);
+            return `<button type="button" class="flavor-cat ${open === c.id ? "on" : ""} ${has ? "has" : ""}" data-action="flavor-cat" data-id="${esc(c.id)}">${esc(c.nameZh)}</button>`;
+          })
+          .join("")}
+      </div>
+      ${sub}
+      <div class="flavor-custom">
+        <input id="flavor-custom-input" maxlength="20" placeholder="其他，自己写" data-testid="flavor-custom">
+        <button type="button" class="fb-mode" data-action="add-custom-flavor">添加</button>
+      </div>
+      <div class="flavor-scale-box">
+        ${scaleRow("酸度", "acidity", f.acidity)}
+        ${scaleRow("甜度", "sweetness", f.sweetness)}
+        ${scaleRow("苦度", "bitterness", f.bitterness)}
+        ${scaleRow("醇厚度", "body", f.body)}
+        <div class="scale-row">
+          <span>余韵</span>
+          <div class="scale-pips" role="radiogroup" aria-label="余韵">
+            ${(DATA.finishLengths || ["短", "中", "长"])
+              .map(
+                (opt) =>
+                  `<button type="button" class="scale-pip ${f.finish === opt ? "on" : ""}" data-action="set-finish" data-value="${esc(opt)}">${esc(opt)}</button>`
+              )
+              .join("")}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function renderBrewFields(d) {
+    const pours = d.pours && d.pours.length ? d.pours : [{ water: "", time: "" }];
+    const ratio = formatRatio(d.dose, d.water) || d.ratio || "自动计算";
+    const ey = formatEY(d.dose, d.beverageWeight, d.tds);
+    const age = roastAgeText(d.roastDate);
+    const otherDripper = (d.dripper || "") === "其他";
+    const otherProcess = (d.process || "") === "其他";
+    const otherPour = (d.pourMethod || "") === "其他";
+    return `
+      <section class="brew-group">
+        <h3>豆子</h3>
+        <div class="field">
+          <label>名称/产区</label>
+          <input name="beanName" value="${esc(d.beanName || "")}" placeholder="例如：耶加雪菲" autocomplete="off">
+        </div>
+        <div class="field"><label>处理法</label>${choiceRow("process", DATA.processMethods || [], d.process || "")}</div>
+        <div class="field other-field" ${otherProcess ? "" : "hidden"} id="process-other-wrap">
+          <label>其他处理法</label>
+          <input name="processOther" value="${esc(d.processOther || "")}" placeholder="请写明">
+        </div>
+        <div class="field"><label>烘焙度</label>${choiceRow("roastLevel", DATA.roastLevels || [], d.roastLevel || "")}</div>
+        <div class="field">
+          <label>烘焙日期</label>
+          <input name="roastDate" type="date" value="${esc(d.roastDate || "")}" data-testid="roast-date">
+          <p class="tiny" id="roast-age">${esc(age)}</p>
+        </div>
+      </section>
+      <section class="brew-group">
+        <h3>器具</h3>
+        <div class="field"><label>滤杯</label>${choiceRow("dripper", DATA.drippers || [], d.dripper || "V60")}</div>
+        <div class="field other-field" ${otherDripper ? "" : "hidden"} id="dripper-other-wrap">
+          <label>其他滤杯</label>
+          <input name="dripperOther" value="${esc(d.dripperOther || "")}" placeholder="请写明">
+        </div>
+        <div class="field">
+          <label>滤纸</label>
+          <input name="filter" value="${esc(d.filter || "")}" placeholder="例如：V60 02 漂白">
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>磨豆机</label>
+            <input name="grinder" value="${esc(d.grinder || "")}" placeholder="品牌或型号">
+          </div>
+          ${unitInput("grind", d.grind, "", { label: "刻度", required: true, placeholder: "例如：20", test: "grind" })}
+        </div>
+      </section>
+      <section class="brew-group">
+        <h3>粉水与温度</h3>
+        <div class="form-grid">
+          ${unitInput("dose", d.dose, "g", { label: "粉量", required: true, placeholder: "15", test: "dose" })}
+          ${unitInput("water", d.water, "g", { label: "总水量", required: true, placeholder: "250", test: "water" })}
+        </div>
+        <div class="ratio-box" data-testid="ratio-box">
+          <span class="tiny">粉水比（自动）</span>
+          <strong id="ratio-output">${esc(ratio === "自动计算" ? "请先填粉量和水量" : ratio)}</strong>
+        </div>
+        ${unitInput("temp", d.temp, "°C", { label: "水温", required: true, placeholder: "92", test: "temp" })}
+        <div class="field"><label>用水</label>${choiceRow("waterType", DATA.waterTypes || [], d.waterType || "")}</div>
+        ${unitInput("tdsWater", d.tdsWater, "ppm", { label: "水质 TDS（可选）", placeholder: "例如：80" })}
+      </section>
+      <section class="brew-group">
+        <h3>闷蒸</h3>
+        <div class="form-grid">
+          ${unitInput("bloomWater", d.bloomWater, "g", { label: "闷蒸水量", placeholder: "45" })}
+          ${unitInput("bloomTime", d.bloomTime, "s", { label: "闷蒸时间", placeholder: "30" })}
+        </div>
+      </section>
+      <section class="brew-group">
+        <h3>注水</h3>
+        ${renderPourRows(pours)}
+        <div class="field" style="margin-top:12px"><label>注水方式</label>${choiceRow("pourMethod", DATA.pourMethods || [], d.pourMethod || "")}</div>
+        <div class="field other-field" ${otherPour ? "" : "hidden"} id="pour-other-wrap">
+          <label>其他注水方式</label>
+          <input name="pourMethodOther" value="${esc(d.pourMethodOther || "")}" placeholder="请写明">
+        </div>
+        <div class="field"><label>扰动</label>${choiceRow("agitation", DATA.agitationTypes || [], d.agitation || "")}</div>
+      </section>
+      <section class="brew-group">
+        <h3>萃取</h3>
+        ${unitInput("time", d.time, "", { label: "总萃取时间", required: true, placeholder: "2:45", time: true, test: "brew-time" })}
+        <div class="form-grid">
+          ${unitInput("beverageWeight", d.beverageWeight, "g", { label: "萃取液重量（可选）", placeholder: "220", test: "beverage-weight" })}
+          ${unitInput("tds", d.tds, "%", { label: "TDS（可选）", placeholder: "1.35", test: "tds" })}
+        </div>
+        <div class="ratio-box" data-testid="ey-box">
+          <span class="tiny">萃取率（自动，需 TDS 和萃取液重量）</span>
+          <strong id="ey-output">${esc(ey ? ey + "%" : "未填齐时不计算")}</strong>
+        </div>
+      </section>
+      <section class="brew-group">
+        <h3>风味</h3>
+        ${renderFlavourPicker(d.flavours)}
+      </section>
+      <section class="brew-group">
+        <h3>笔记</h3>
+        <div class="field">
+          <label>补充说明 <span class="hint">可选</span></label>
+          <textarea name="notes" placeholder="手法、口感，或其他想给老师看的话">${esc(d.notes || "")}</textarea>
+        </div>
+      </section>`;
+  }
+
+  function collectBrewDraftFromForm() {
+    const form = $("#hw-form");
+    if (!form) return state.draftHw;
+    const fd = new FormData(form);
+    const d = state.draftHw || emptyDraftHw();
+    const keys = [
+      "beanName",
+      "process",
+      "processOther",
+      "roastLevel",
+      "roastDate",
+      "dripper",
+      "dripperOther",
+      "filter",
+      "grinder",
+      "grind",
+      "dose",
+      "water",
+      "temp",
+      "waterType",
+      "tdsWater",
+      "bloomWater",
+      "bloomTime",
+      "pourMethod",
+      "pourMethodOther",
+      "agitation",
+      "time",
+      "beverageWeight",
+      "tds",
+      "notes"
+    ];
+    keys.forEach((k) => {
+      if (fd.has(k)) d[k] = String(fd.get(k) || "").trim();
+    });
+    const pours = [];
+    form.querySelectorAll(".pour-row").forEach((row) => {
+      const i = row.getAttribute("data-index");
+      pours.push({
+        water: String(fd.get("pour-water-" + i) || "").trim(),
+        time: String(fd.get("pour-time-" + i) || "").trim()
+      });
+    });
+    if (pours.length) d.pours = pours;
+    d.ratio = formatRatio(d.dose, d.water);
+    d.ey = formatEY(d.dose, d.beverageWeight, d.tds);
+    if (fd.has("finish")) d.flavours = Object.assign(normalizeFlavours(d.flavours), { finish: String(fd.get("finish") || "") });
+    state.draftHw = d;
+    return d;
+  }
+
+  function updateBrewCalcs() {
+    const form = $("#hw-form");
+    if (!form) return;
+    const dose = form.querySelector('[name="dose"]');
+    const water = form.querySelector('[name="water"]');
+    const bev = form.querySelector('[name="beverageWeight"]');
+    const tds = form.querySelector('[name="tds"]');
+    const roast = form.querySelector('[name="roastDate"]');
+    const ratioEl = $("#ratio-output");
+    const eyEl = $("#ey-output");
+    const ageEl = $("#roast-age");
+    const ratio = formatRatio(dose && dose.value, water && water.value);
+    if (ratioEl) ratioEl.textContent = ratio || "请先填粉量和水量";
+    const ey = formatEY(dose && dose.value, bev && bev.value, tds && tds.value);
+    if (eyEl) eyEl.textContent = ey ? ey + "%" : "未填齐时不计算";
+    if (ageEl) ageEl.textContent = roastAgeText(roast && roast.value);
+    const dripperOther = $("#dripper-other-wrap");
+    const processOther = $("#process-other-wrap");
+    const pourOther = $("#pour-other-wrap");
+    const dripper = form.querySelector('input[name="dripper"]:checked');
+    const process = form.querySelector('input[name="process"]:checked');
+    const pourMethod = form.querySelector('input[name="pourMethod"]:checked');
+    if (dripperOther) dripperOther.hidden = !(dripper && dripper.value === "其他");
+    if (processOther) processOther.hidden = !(process && process.value === "其他");
+    if (pourOther) pourOther.hidden = !(pourMethod && pourMethod.value === "其他");
+  }
+
+  function refreshBrewFlavourAndPours() {
+    const form = $("#hw-form");
+    if (!form || form.getAttribute("data-type") !== "brew") return;
+    const scroll = $("#view") ? $("#view").scrollTop : 0;
+    const pourBox = $("#pour-list");
+    if (pourBox) {
+      const html = renderPourRows(state.draftHw.pours);
+      const wrap = pourBox.parentNode;
+      const tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      const current = pourBox;
+      const count = $("#pour-count");
+      const addBtn = form.querySelector('[data-action="add-pour"]');
+      const next = tmp.querySelector("#pour-list");
+      const nextCount = tmp.querySelector("#pour-count");
+      const nextAdd = tmp.querySelector('[data-action="add-pour"]');
+      if (current && next) current.replaceWith(next);
+      if (count && nextCount) count.replaceWith(nextCount);
+      else if (nextCount && addBtn) addBtn.insertAdjacentElement("beforebegin", nextCount);
+      if (addBtn && nextAdd) addBtn.replaceWith(nextAdd);
+    }
+    const picker = $("#flavor-picker");
+    if (picker) picker.outerHTML = renderFlavourPicker(state.draftHw.flavours);
+    if ($("#view")) $("#view").scrollTop = scroll;
+    updateBrewCalcs();
+  }
+
+  function collectBrewParamsForSubmit() {
+    const d = collectBrewDraftFromForm();
+    const pours = normalizePours(d.pours);
+    return {
+      beanName: d.beanName || "",
+      process: d.process || "",
+      processOther: d.process === "其他" ? d.processOther || "" : "",
+      roastLevel: d.roastLevel || "",
+      roastDate: d.roastDate || "",
+      dripper: d.dripper || "",
+      dripperOther: d.dripper === "其他" ? d.dripperOther || "" : "",
+      filter: d.filter || "",
+      grinder: d.grinder || "",
+      grind: d.grind || "",
+      dose: d.dose || "",
+      water: d.water || "",
+      ratio: formatRatio(d.dose, d.water),
+      temp: d.temp || "",
+      waterType: d.waterType || "",
+      tdsWater: d.tdsWater || "",
+      bloomWater: d.bloomWater || "",
+      bloomTime: d.bloomTime || "",
+      pours,
+      pourMethod: d.pourMethod || "",
+      pourMethodOther: d.pourMethod === "其他" ? d.pourMethodOther || "" : "",
+      agitation: d.agitation || "",
+      time: d.time || "",
+      beverageWeight: d.beverageWeight || "",
+      tds: d.tds || "",
+      ey: formatEY(d.dose, d.beverageWeight, d.tds)
+    };
+  }
+
+  function validateBrewSubmit(photos, params) {
+    if (!photos || !photos.length) return "请先拍一张或选一张照片";
+    if (parseNum(params.dose) == null || parseNum(params.dose) <= 0) return "请填写粉量，单位是克";
+    if (parseNum(params.water) == null || parseNum(params.water) <= 0) return "请填写总水量，单位是克";
+    if (parseNum(params.temp) == null) return "请填写水温";
+    if (!(params.grind && String(params.grind).trim())) return "请填写磨豆机刻度";
+    if (!validBrewTime(params.time)) return "请填写总萃取时间，格式如 2:45";
+    return "";
+  }
+
+
 
   function pendingCount() {
     return state.homework.filter((h) => h.status === "pending").length;
@@ -1045,19 +1697,7 @@
           <label>笔记 <span class="hint">Notes</span></label>
           <textarea name="notes" placeholder="对称、对比、哪里不满意…">${esc(d.notes)}</textarea>
         </div>`
-      : `
-        <div class="field"><label>滤杯 Dripper</label>${choiceRow("dripper", DATA.drippers, d.dripper || "V60")}</div>
-        <div class="form-grid">
-          <div class="field"><label>粉量 Dose</label><input name="dose" value="${esc(d.dose)}" /></div>
-          <div class="field"><label>水量 Water</label><input name="water" value="${esc(d.water)}" /></div>
-          <div class="field"><label>粉水比 Ratio</label><input name="ratio" value="${esc(d.ratio)}" /></div>
-          <div class="field"><label>研磨 Grind</label><input name="grind" value="${esc(d.grind)}" placeholder="例如：中细" /></div>
-        </div>
-        <div class="field"><label>时间 Time</label><input name="time" value="${esc(d.time)}" placeholder="例如：2:45" /></div>
-        <div class="field">
-          <label>风味笔记 <span class="hint">Tasting notes</span></label>
-          <textarea name="notes" placeholder="气味、味道、尾韵…">${esc(d.notes)}</textarea>
-        </div>`;
+      : renderBrewFields(d);
     return `
       <p class="kicker">${esc(typ.nameEn)}</p>
       <h2 class="block-title" style="margin-top:4px">交一份${esc(typ.nameZh)}作业</h2>
@@ -1116,10 +1756,11 @@
         ${renderFeedbackPhoto(h.photos, markers, 0, { interactive: false })}
         <div class="pad">
           <p class="tiny">提交于 ${esc(h.submittedAt)}${h.photos && h.photos.length > 1 ? " · " + h.photos.length + " 张照片" : ""}</p>
-          <div class="form-grid" style="margin-top:10px">
-            ${renderHwParams(h)}
-          </div>
-          ${h.notes ? `<p style="margin-top:12px">${esc(h.notes)}</p>` : ""}
+          ${
+            h.type === "brew"
+              ? `${renderBrewRecipeCard(h)}${renderFlavourView(h.flavours)}${h.notes ? `<p class="hw-notes">${esc(h.notes)}</p>` : ""}`
+              : `<div class="form-grid" style="margin-top:10px">${renderHwParams(h)}</div>${h.notes ? `<p style="margin-top:12px">${esc(h.notes)}</p>` : ""}`
+          }
         </div>
       </article>
       ${
@@ -1509,12 +2150,12 @@
           </div>
         </div>
         ${renderFeedbackPhoto(h.photos, d.markers, d.photoIndex, { interactive: true, markMode: d.markMode })}
-        <article class="card pad" style="margin:12px 0">
-          <p class="tiny">${esc(recipeLabel)}</p>
-          <div class="form-grid" style="margin-top:8px">
-            ${renderHwParams(h)}
-          </div>
-          ${h.notes ? `<p style="margin-top:12px">${esc(h.notes)}</p>` : `<p class="sub" style="margin-top:12px">学员没有写笔记。</p>`}
+        <article class="card pad fb-recipe" style="margin:12px 0">
+          ${
+            typ.id === "brew"
+              ? `${renderBrewRecipeCard(h)}${renderFlavourView(h.flavours)}${h.notes ? `<p class="hw-notes">${esc(h.notes)}</p>` : `<p class="sub" style="margin-top:12px">学员没有写笔记。</p>`}`
+              : `<p class="tiny">${esc(recipeLabel)}</p><div class="form-grid" style="margin-top:8px">${renderHwParams(h)}</div>${h.notes ? `<p style="margin-top:12px">${esc(h.notes)}</p>` : `<p class="sub" style="margin-top:12px">学员没有写笔记。</p>`}`
+          }
         </article>
         <form class="form" id="grade-form" data-id="${esc(id)}" data-type="${esc(h.type)}">
           <div class="fb-total-card" id="grade-live">
@@ -2211,6 +2852,11 @@
           });
         });
       }
+      if (form && form.getAttribute("data-type") === "brew") {
+        form.addEventListener("input", updateBrewCalcs);
+        form.addEventListener("change", updateBrewCalcs);
+        updateBrewCalcs();
+      }
       if (form) {
         form.addEventListener("submit", (e) => {
           e.preventDefault();
@@ -2218,26 +2864,32 @@
           const type = form.getAttribute("data-type") === "latte" ? "latte" : "brew";
           const typ = hwTypeMeta(type);
           const photos = (state.draftHw.photos || []).slice();
-          if (!photos.length) {
-            showToast("请先拍一张或选一张照片（演示）");
-            return;
-          }
           const id = "hw-local-" + type + "-" + Date.now();
-          const params = type === "latte"
-            ? {
-                pattern: String(fd.get("pattern") || "心形"),
-                cupSize: String(fd.get("cupSize") || "180ml"),
-                milkType: String(fd.get("milkType") || "全脂"),
-                milkTemp: String(fd.get("milkTemp") || "55–60°C")
-              }
-            : {
-                dose: String(fd.get("dose") || ""),
-                water: String(fd.get("water") || ""),
-                ratio: String(fd.get("ratio") || ""),
-                grind: String(fd.get("grind") || ""),
-                time: String(fd.get("time") || ""),
-                dripper: String(fd.get("dripper") || "V60")
-              };
+          let params;
+          let flavours = null;
+          if (type === "latte") {
+            if (!photos.length) {
+              showToast("请先拍一张或选一张照片");
+              return;
+            }
+            params = {
+              pattern: String(fd.get("pattern") || "心形"),
+              cupSize: String(fd.get("cupSize") || "180ml"),
+              milkType: String(fd.get("milkType") || "全脂"),
+              milkTemp: String(fd.get("milkTemp") || "55–60°C")
+            };
+          } else {
+            params = collectBrewParamsForSubmit();
+            const err = validateBrewSubmit(photos, params);
+            if (err) {
+              showToast(err);
+              return;
+            }
+            flavours = normalizeFlavours(state.draftHw.flavours);
+            flavours.openCat = "";
+          }
+          const notesRaw = String(fd.get("notes") || "").trim();
+          const notes = notesRaw ? notesRaw + "（示例提交，仅本地可见）" : "";
           state.homework.unshift({
             id,
             type,
@@ -2251,7 +2903,8 @@
             photo: photos[0],
             photos,
             params,
-            notes: (String(fd.get("notes") || "").trim() || "（未填写笔记）") + "（示例提交，仅本地可见）"
+            flavours,
+            notes
           });
           addPoints(20, "提交作业「" + typ.nameZh + "」", "Homework submitted");
           state.draftHw = emptyDraftHw();
@@ -2473,6 +3126,91 @@
         if (html) box.outerHTML = html;
         else box.remove();
       }
+    } else if (action === "add-pour") {
+      e.preventDefault();
+      collectBrewDraftFromForm();
+      state.draftHw.pours = (state.draftHw.pours && state.draftHw.pours.length ? state.draftHw.pours : [{ water: "", time: "" }]).concat([{ water: "", time: "" }]);
+      refreshBrewFlavourAndPours();
+    } else if (action === "remove-pour") {
+      e.preventDefault();
+      collectBrewDraftFromForm();
+      const i = Number(t.getAttribute("data-index"));
+      const list = (state.draftHw.pours || []).slice();
+      if (list.length <= 1) {
+        state.draftHw.pours = [{ water: "", time: "" }];
+      } else {
+        list.splice(i, 1);
+        state.draftHw.pours = list;
+      }
+      refreshBrewFlavourAndPours();
+    } else if (action === "flavor-cat") {
+      e.preventDefault();
+      collectBrewDraftFromForm();
+      const id = t.getAttribute("data-id");
+      const f = normalizeFlavours(state.draftHw.flavours);
+      f.openCat = f.openCat === id ? "" : id;
+      state.draftHw.flavours = f;
+      refreshBrewFlavourAndPours();
+    } else if (action === "toggle-flavor") {
+      e.preventDefault();
+      collectBrewDraftFromForm();
+      const id = t.getAttribute("data-id");
+      const found = flavorItemById(id);
+      if (!found) return;
+      const f = normalizeFlavours(state.draftHw.flavours);
+      const exists = f.tags.findIndex((x) => x.id === id);
+      if (exists >= 0) f.tags.splice(exists, 1);
+      else f.tags.push(found);
+      f.openCat = found.cat;
+      state.draftHw.flavours = f;
+      refreshBrewFlavourAndPours();
+    } else if (action === "remove-flavor") {
+      e.preventDefault();
+      collectBrewDraftFromForm();
+      const id = t.getAttribute("data-id");
+      const f = normalizeFlavours(state.draftHw.flavours);
+      f.tags = f.tags.filter((x) => x.id !== id);
+      state.draftHw.flavours = f;
+      refreshBrewFlavourAndPours();
+    } else if (action === "add-custom-flavor") {
+      e.preventDefault();
+      collectBrewDraftFromForm();
+      const input = $("#flavor-custom-input");
+      const text = (input && input.value.trim()) || "";
+      if (!text) {
+        showToast("请先写下这个风味");
+        return;
+      }
+      const f = normalizeFlavours(state.draftHw.flavours);
+      if (f.custom.indexOf(text) === -1) f.custom.push(text);
+      state.draftHw.flavours = f;
+      if (input) input.value = "";
+      refreshBrewFlavourAndPours();
+    } else if (action === "remove-custom-flavor") {
+      e.preventDefault();
+      collectBrewDraftFromForm();
+      const i = Number(t.getAttribute("data-index"));
+      const f = normalizeFlavours(state.draftHw.flavours);
+      f.custom.splice(i, 1);
+      state.draftHw.flavours = f;
+      refreshBrewFlavourAndPours();
+    } else if (action === "set-finish") {
+      e.preventDefault();
+      collectBrewDraftFromForm();
+      const val = t.getAttribute("data-value");
+      const f = normalizeFlavours(state.draftHw.flavours);
+      f.finish = f.finish === val ? "" : val;
+      state.draftHw.flavours = f;
+      refreshBrewFlavourAndPours();
+    } else if (action === "set-scale") {
+      e.preventDefault();
+      collectBrewDraftFromForm();
+      const key = t.getAttribute("data-key");
+      const val = Number(t.getAttribute("data-value"));
+      const f = normalizeFlavours(state.draftHw.flavours);
+      f[key] = f[key] === val ? "" : val;
+      state.draftHw.flavours = f;
+      refreshBrewFlavourAndPours();
     } else if (action === "grade-template") {
       e.preventDefault();
       const area = $("#grade-comments");
