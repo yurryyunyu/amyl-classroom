@@ -1917,3 +1917,83 @@ h2.block-title .en {
 .pour-row { grid-template-columns: 3em 1fr 1fr auto; }
 .brew-group { padding-bottom: 14px; }
 
+
+.unit-wrap .unit-prefix { min-width: auto; }
+.pour-card {
+  padding: 10px 10px 8px;
+  border-radius: 14px;
+  background: #FBF8F2;
+  border: 1px solid rgba(240,160,90,0.28);
+}
+.pour-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.pour-card-top strong {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1A1A1A;
+}
+.xb-recipe { margin-top: 12px; }
+.xb-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.xb-stat {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #F4E4C8;
+  border: 1px solid rgba(240,160,90,0.45);
+  min-width: 0;
+}
+.xb-stat span {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.xb-stat strong {
+  font-family: var(--serif-en);
+  font-size: 1.2rem;
+  color: #1A1A1A;
+  word-break: break-word;
+}
+.xb-pours { display: flex; flex-direction: column; gap: 8px; }
+.xb-pour-row {
+  padding: 8px 10px 10px;
+  border-radius: 14px;
+  background: #FBF8F2;
+  border: 1px solid rgba(240,160,90,0.28);
+}
+.xb-pour-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1A1A1A;
+  margin: 0 0 6px;
+}
+.xb-pour-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+}
+.xb-pour-cell span {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.xb-pour-cell strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1A1A1A;
+}
+.xb-pour-cell.is-empty strong { color: var(--muted-soft); font-weight: 600; }
+.xb-sum { margin: 8px 0 0; }
+.fb-recipe .xb-header { margin-bottom: 10px; }

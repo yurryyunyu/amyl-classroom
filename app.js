@@ -151,7 +151,10 @@
       const merged = Object.assign(base, saved, {
         draftHw: Object.assign(base.draftHw, saved.draftHw || {}, {
           flavours: normalizeFlavours((saved.draftHw && saved.draftHw.flavours) || base.draftHw.flavours),
-          pours: (saved.draftHw && Array.isArray(saved.draftHw.pours) && saved.draftHw.pours.length) ? saved.draftHw.pours : base.draftHw.pours
+          pours: normalizePours(
+            (saved.draftHw && Array.isArray(saved.draftHw.pours) && saved.draftHw.pours.length) ? saved.draftHw.pours : base.draftHw.pours,
+            saved.draftHw || {}
+          )
         }),
         draftGrade: Object.assign({}, saved.draftGrade || {}),
         draftPost: Object.assign(base.draftPost, saved.draftPost || {})
@@ -350,7 +353,7 @@
       tdsWater: "",
       bloomWater: "",
       bloomTime: "",
-      pours: [{ water: "", time: "" }],
+      pours: [{ water: "", temp: "", flow: "", pattern: "", pause: "" }],
       pourMethod: "",
       pourMethodOther: "",
       agitation: "",
@@ -392,6 +395,42 @@
   function validBrewTime(v) {
     const s = String(v || "").trim();
     return /^\d{1,2}:[0-5]\d$/.test(s);
+  }
+
+  function parseRatioNumber(v) {
+    if (v == null || v === "") return null;
+    const s = String(v).trim().replace("：", ":");
+    if (s.indexOf(":") >= 0) return parseNum(s.slice(s.indexOf(":") + 1));
+    return parseNum(s);
+  }
+
+  function waterFromDoseRatio(dose, ratio) {
+    const d = parseNum(dose);
+    const r = parseRatioNumber(ratio);
+    if (!d || d <= 0 || !r || r <= 0) return "";
+    const w = Math.round(d * r * 10) / 10;
+    return Number.isInteger(w) ? String(w) : w.toFixed(1);
+  }
+
+  function poursWaterSum(pours) {
+    return (pours || []).reduce((a, p) => a + (parseNum(p && p.water) || 0), 0);
+  }
+
+  function mapPourPattern(v) {
+    const s = String(v || "").trim();
+    if (s === "中心" || s === "螺旋" || s === "绕圈") return s;
+    if (s === "center" || s === "centred" || s === "centered") return "中心";
+    if (s === "spiral") return "螺旋";
+    if (s === "circular" || s === "circle" || s === "ring") return "绕圈";
+    return "";
+  }
+
+  function emptyPour() {
+    return { water: "", temp: "", flow: "", pattern: "", pause: "" };
+  }
+
+  function pourLabel(i) {
+    return i === 0 ? "闷蒸" : "第 " + (i + 1) + " 段";
   }
 
   function roastAgeText(dateStr) {
@@ -487,23 +526,66 @@
     };
   }
 
-  function normalizePours(list) {
-    if (!Array.isArray(list) || !list.length) return [];
-    return list
-      .map((p) => ({
-        water: p && p.water != null ? String(p.water).trim() : "",
-        time: p && p.time != null ? String(p.time).trim() : ""
-      }))
-      .filter((p) => p.water || p.time);
+  function normalizePours(list, legacy) {
+    const src = legacy && typeof legacy === "object" ? legacy : {};
+    const raw = Array.isArray(list) ? list : (Array.isArray(src.pours) ? src.pours : []);
+    const looksNew = raw.some((p) => p && (p.temp != null || p.flow != null || p.pattern != null || p.pause != null || p.temp_c != null || p.ml != null || p.flow_ml_s != null || p.pause_s != null));
+    if (looksNew && raw.length) {
+      return raw.map((p) => ({
+        water: String((p && (p.water != null && p.water !== "" ? p.water : p.ml)) || "").trim(),
+        temp: String((p && (p.temp != null && p.temp !== "" ? p.temp : p.temp_c)) || "").trim(),
+        flow: String((p && (p.flow != null && p.flow !== "" ? p.flow : p.flow_ml_s)) || "").trim(),
+        pattern: mapPourPattern(p && p.pattern),
+        pause: String((p && (p.pause != null && p.pause !== "" ? p.pause : p.pause_s)) || "").trim()
+      }));
+    }
+    const out = [];
+    const pattern = mapPourPattern(src.pourMethod);
+    const temp = src.temp != null ? String(src.temp).trim() : "";
+    if (src.bloomWater || src.bloomTime) {
+      out.push({
+        water: String(src.bloomWater || "").trim(),
+        temp,
+        flow: "",
+        pattern,
+        pause: String(src.bloomTime || "").trim()
+      });
+    }
+    const old = raw.map((p) => ({
+      water: p && p.water != null ? String(p.water).trim() : "",
+      time: p && p.time != null ? String(p.time).trim() : ""
+    }));
+    const nums = old.map((p) => parseNum(p.water));
+    const usable = nums.filter((n) => n != null);
+    const cumulative = usable.length >= 2 && usable.every((n, i) => i === 0 || n + 0.001 >= usable[i - 1]);
+    let prev = out.length && parseNum(out[0].water) != null ? parseNum(out[0].water) : 0;
+    old.forEach((p, i) => {
+      const n = parseNum(p.water);
+      if (i === 0 && out.length && n != null && parseNum(out[0].water) === n) {
+        prev = n;
+        return;
+      }
+      let vol = p.water;
+      if (cumulative && n != null) {
+        vol = String(Math.round((n - prev) * 10) / 10);
+        prev = n;
+      }
+      if (vol || temp || pattern) out.push({ water: vol, temp, flow: "", pattern, pause: "" });
+    });
+    return out;
   }
 
   function normalizeBrewParams(p) {
     const src = p && typeof p === "object" ? p : {};
     const out = Object.assign({}, src);
-    if (out.pours) out.pours = normalizePours(out.pours);
+    out.pours = normalizePours(out.pours, src);
     if (out.ratio == null || out.ratio === "") {
       const auto = formatRatio(out.dose, out.water);
       if (auto) out.ratio = auto;
+    }
+    if ((out.water == null || out.water === "") && out.dose && out.ratio) {
+      const autoW = waterFromDoseRatio(out.dose, out.ratio);
+      if (autoW) out.water = autoW;
     }
     if (out.ey == null || out.ey === "") {
       const auto = formatEY(out.dose, out.beverageWeight, out.tds);
@@ -560,25 +642,43 @@
 
   function renderBrewRecipeCard(h) {
     const p = normalizeBrewParams((h && h.params) || {});
-    const dripper = p.dripper === "其他" && p.dripperOther ? p.dripper + " · " + p.dripperOther : p.dripper;
     const process = p.process === "其他" && p.processOther ? p.process + " · " + p.processOther : p.process;
-    const pourMethod = p.pourMethod === "其他" && p.pourMethodOther ? p.pourMethod + " · " + p.pourMethodOther : p.pourMethod;
     const ratio = p.ratio || formatRatio(p.dose, p.water);
-    const ey = p.ey || formatEY(p.dose, p.beverageWeight, p.tds);
+    const water = p.water || waterFromDoseRatio(p.dose, ratio);
     const age = roastAgeText(p.roastDate);
     const roast = [p.roastDate, age].filter(Boolean).join(" · ");
-    const pours = normalizePours(p.pours);
-    const pourLines = pours.length
+    const pours = normalizePours(p.pours, p);
+    const pourSum = poursWaterSum(pours);
+    const target = parseNum(water);
+    const sumText = pours.length
+      ? (target != null && pourSum
+          ? "注水合计 " + pourSum + " g" + (Math.abs(pourSum - target) < 0.15 ? "，与总水量一致" : "，总水量 " + water + " g")
+          : "注水合计 " + pourSum + " g")
+      : "";
+    const rows = pours.length
       ? pours
           .map((row, i) => {
-            const w = row.water ? displayVal(row.water, "g") : "未填";
-            const t = row.time || "未填";
-            return `<li>第 ${i + 1} 段 ${esc(w)} @ ${esc(t)}</li>`;
+            const cells = [
+              ["水量", displayVal(row.water, "g")],
+              ["水温", displayVal(row.temp, "°C")],
+              ["流速", displayVal(row.flow, "ml/s")],
+              ["注水方式", row.pattern],
+              ["停顿", displayVal(row.pause, "s")]
+            ]
+              .map(([lab, val]) => {
+                const filled = val != null && String(val).trim() !== "";
+                return `<div class="xb-pour-cell ${filled ? "" : "is-empty"}"><span>${esc(lab)}</span><strong>${esc(filled ? val : "未填")}</strong></div>`;
+              })
+              .join("");
+            return `<div class="xb-pour-row" data-testid="pour-row-${i}">
+              <div class="xb-pour-name">${esc(pourLabel(i))}</div>
+              <div class="xb-pour-grid">${cells}</div>
+            </div>`;
           })
           .join("")
-      : `<li class="is-empty">未填</li>`;
-    return `<section class="recipe-card" data-testid="recipe-card">
-      <h3>冲煮记录</h3>
+      : `<p class="sub is-empty">注水段未填</p>`;
+    return `<section class="recipe-card xb-recipe" data-testid="recipe-card">
+      <h3>冲煮配方</h3>
       <div class="recipe-block">
         <h4>豆子</h4>
         <div class="form-grid">
@@ -588,50 +688,16 @@
           ${recipeCell("烘焙日期", roast)}
         </div>
       </div>
-      <div class="recipe-block">
-        <h4>器具</h4>
-        <div class="form-grid">
-          ${recipeCell("滤杯", dripper)}
-          ${recipeCell("滤纸", p.filter)}
-          ${recipeCell("磨豆机", p.grinder)}
-          ${recipeCell("刻度", p.grind)}
-        </div>
-      </div>
-      <div class="recipe-block">
-        <h4>粉水与温度</h4>
-        <div class="form-grid">
-          ${recipeCell("粉量", p.dose, "g")}
-          ${recipeCell("总水量", p.water, "g")}
-          ${recipeCell("粉水比", ratio)}
-          ${recipeCell("水温", p.temp, "°C")}
-          ${recipeCell("用水", p.waterType)}
-          ${recipeCell("水质 TDS", p.tdsWater, "ppm")}
-        </div>
-      </div>
-      <div class="recipe-block">
-        <h4>闷蒸</h4>
-        <div class="form-grid">
-          ${recipeCell("闷蒸水量", p.bloomWater, "g")}
-          ${recipeCell("闷蒸时间", p.bloomTime, "s")}
-        </div>
+      <div class="xb-header" data-testid="xb-header">
+        <div class="xb-stat"><span>粉量</span><strong>${esc(p.dose ? displayVal(p.dose, "g") : "未填")}</strong></div>
+        <div class="xb-stat"><span>粉水比</span><strong>${esc(ratio || "未填")}</strong></div>
+        <div class="xb-stat"><span>总水量</span><strong>${esc(water ? displayVal(water, "g") : "未填")}</strong></div>
+        <div class="xb-stat"><span>刻度</span><strong>${esc(p.grind || "未填")}</strong></div>
       </div>
       <div class="recipe-block">
         <h4>注水</h4>
-        <div class="form-grid">
-          ${recipeCell("段数", pours.length ? String(pours.length) : "")}
-          ${recipeCell("注水方式", pourMethod)}
-          ${recipeCell("扰动", p.agitation)}
-        </div>
-        <ul class="pour-view">${pourLines}</ul>
-      </div>
-      <div class="recipe-block">
-        <h4>萃取</h4>
-        <div class="form-grid">
-          ${recipeCell("总萃取时间", p.time)}
-          ${recipeCell("萃取液重量", p.beverageWeight, "g")}
-          ${recipeCell("TDS", p.tds, "%")}
-          ${recipeCell("萃取率", ey, "%")}
-        </div>
+        <div class="xb-pours">${rows}</div>
+        ${sumText ? `<p class="tiny xb-sum" data-testid="pour-sum">${esc(sumText)}</p>` : ""}
       </div>
     </section>`;
   }
@@ -653,20 +719,51 @@
   }
 
   function renderPourRows(pours) {
-    const list = pours && pours.length ? pours : [{ water: "", time: "" }];
-    return `<div id="pour-list" class="pour-list" data-testid="pour-list">
+    const list = pours && pours.length ? pours : [emptyPour()];
+    const patterns = DATA.pourPatterns || ["中心", "螺旋", "绕圈"];
+    return `<div id="pour-list" class="pour-list xb-pour-edit" data-testid="pour-list">
       ${list
-        .map(
-          (p, i) => `<div class="pour-row" data-index="${i}">
-            <span class="pour-n">第 ${i + 1} 段</span>
-            <div class="unit-wrap"><input name="pour-water-${i}" value="${esc(p.water || "")}" inputmode="decimal" placeholder="累计水量" aria-label="第 ${i + 1} 段累计水量"><span class="unit">g</span></div>
-            <div class="unit-wrap"><input name="pour-time-${i}" value="${esc(p.time || "")}" inputmode="numeric" placeholder="1:15" aria-label="第 ${i + 1} 段时间"></div>
-            <button type="button" class="fb-mini" data-action="remove-pour" data-index="${i}" aria-label="删除第 ${i + 1} 段">删</button>
-          </div>`
-        )
+        .map((p, i) => {
+          const pat = mapPourPattern(p.pattern);
+          return `<div class="pour-card" data-index="${i}">
+            <div class="pour-card-top">
+              <strong>${esc(pourLabel(i))}</strong>
+              ${i === 0 ? `<span class="tiny">第一段为闷蒸</span>` : `<button type="button" class="fb-mini" data-action="remove-pour" data-index="${i}" aria-label="删除${esc(pourLabel(i))}">删</button>`}
+            </div>
+            <div class="form-grid">
+              <div class="field unit-field">
+                <label>水量</label>
+                <div class="unit-wrap"><input name="pour-water-${i}" value="${esc(p.water || "")}" inputmode="decimal" placeholder="${i === 0 ? "45" : "100"}" aria-label="${esc(pourLabel(i))}水量"><span class="unit">g</span></div>
+              </div>
+              <div class="field unit-field">
+                <label>水温</label>
+                <div class="unit-wrap"><input name="pour-temp-${i}" value="${esc(p.temp || "")}" inputmode="decimal" placeholder="92" aria-label="${esc(pourLabel(i))}水温"><span class="unit">°C</span></div>
+              </div>
+              <div class="field unit-field">
+                <label>流速</label>
+                <div class="unit-wrap"><input name="pour-flow-${i}" value="${esc(p.flow || "")}" inputmode="decimal" placeholder="3.0" aria-label="${esc(pourLabel(i))}流速"><span class="unit">ml/s</span></div>
+              </div>
+              <div class="field unit-field">
+                <label>停顿</label>
+                <div class="unit-wrap"><input name="pour-pause-${i}" value="${esc(p.pause || "")}" inputmode="numeric" placeholder="${i === 0 ? "30" : "0"}" aria-label="${esc(pourLabel(i))}停顿"><span class="unit">s</span></div>
+              </div>
+            </div>
+            <div class="field">
+              <label>注水方式</label>
+              <div class="choice-row compact">
+                ${patterns
+                  .map(
+                    (opt) =>
+                      `<label><input type="radio" name="pour-pattern-${i}" value="${esc(opt)}" ${pat === opt ? "checked" : ""}>${esc(opt)}</label>`
+                  )
+                  .join("")}
+              </div>
+            </div>
+          </div>`;
+        })
         .join("")}
     </div>
-    <p class="tiny" id="pour-count">共 ${list.length} 段</p>
+    <p class="tiny" id="pour-count" data-testid="pour-sum-live">共 ${list.length} 段</p>
     <button type="button" class="fb-mode" data-action="add-pour" data-testid="add-pour">加一段注水</button>`;
   }
 
@@ -722,13 +819,16 @@
   }
 
   function renderBrewFields(d) {
-    const pours = d.pours && d.pours.length ? d.pours : [{ water: "", time: "" }];
-    const ratio = formatRatio(d.dose, d.water) || d.ratio || "自动计算";
-    const ey = formatEY(d.dose, d.beverageWeight, d.tds);
+    const pours = (() => {
+      const list = normalizePours(d.pours, d);
+      return list.length ? list : [emptyPour()];
+    })();
+    const ratio = d.ratio || formatRatio(d.dose, d.water) || "";
+    const water = d.water || waterFromDoseRatio(d.dose, ratio);
     const age = roastAgeText(d.roastDate);
-    const otherDripper = (d.dripper || "") === "其他";
     const otherProcess = (d.process || "") === "其他";
-    const otherPour = (d.pourMethod || "") === "其他";
+    const ratioNum = parseRatioNumber(ratio);
+    const ratioShow = ratio || "";
     return `
       <section class="brew-group">
         <h3>豆子</h3>
@@ -749,66 +849,26 @@
         </div>
       </section>
       <section class="brew-group">
-        <h3>器具</h3>
-        <div class="field"><label>滤杯</label>${choiceRow("dripper", DATA.drippers || [], d.dripper || "V60")}</div>
-        <div class="field other-field" ${otherDripper ? "" : "hidden"} id="dripper-other-wrap">
-          <label>其他滤杯</label>
-          <input name="dripperOther" value="${esc(d.dripperOther || "")}" placeholder="请写明">
-        </div>
-        <div class="field">
-          <label>滤纸</label>
-          <input name="filter" value="${esc(d.filter || "")}" placeholder="例如：V60 02 漂白">
-        </div>
-        <div class="form-grid">
-          <div class="field">
-            <label>磨豆机</label>
-            <input name="grinder" value="${esc(d.grinder || "")}" placeholder="品牌或型号">
-          </div>
-          ${unitInput("grind", d.grind, "", { label: "刻度", required: true, placeholder: "例如：20", test: "grind" })}
-        </div>
-      </section>
-      <section class="brew-group">
-        <h3>粉水与温度</h3>
+        <h3>配方</h3>
         <div class="form-grid">
           ${unitInput("dose", d.dose, "g", { label: "粉量", required: true, placeholder: "15", test: "dose" })}
-          ${unitInput("water", d.water, "g", { label: "总水量", required: true, placeholder: "250", test: "water" })}
+          <div class="field unit-field">
+            <label class="required-mark">粉水比<span class="req">必填</span></label>
+            <div class="unit-wrap">
+              <span class="unit unit-prefix">1:</span>
+              <input name="ratio" value="${esc(ratioNum != null ? String(ratioNum) : "")}" inputmode="decimal" placeholder="16.7" data-testid="ratio" aria-required="true" autocomplete="off">
+            </div>
+          </div>
+          ${unitInput("water", water, "g", { label: "总水量", required: true, placeholder: "250", test: "water" })}
+          ${unitInput("grind", d.grind, "", { label: "刻度", required: true, placeholder: "例如：20", test: "grind" })}
         </div>
-        <div class="ratio-box" data-testid="ratio-box">
-          <span class="tiny">粉水比（自动）</span>
-          <strong id="ratio-output">${esc(ratio === "自动计算" ? "请先填粉量和水量" : ratio)}</strong>
-        </div>
-        ${unitInput("temp", d.temp, "°C", { label: "水温", required: true, placeholder: "92", test: "temp" })}
-        <div class="field"><label>用水</label>${choiceRow("waterType", DATA.waterTypes || [], d.waterType || "")}</div>
-        ${unitInput("tdsWater", d.tdsWater, "ppm", { label: "水质 TDS（可选）", placeholder: "例如：80" })}
-      </section>
-      <section class="brew-group">
-        <h3>闷蒸</h3>
-        <div class="form-grid">
-          ${unitInput("bloomWater", d.bloomWater, "g", { label: "闷蒸水量", placeholder: "45" })}
-          ${unitInput("bloomTime", d.bloomTime, "s", { label: "闷蒸时间", placeholder: "30" })}
-        </div>
+        <p class="tiny">粉量和粉水比会自动算出总水量。改总水量时，粉水比会跟着变。</p>
       </section>
       <section class="brew-group">
         <h3>注水</h3>
+        <p class="tiny">第一段是闷蒸。每一段填写水量、水温、流速、注水方式和停顿。</p>
         ${renderPourRows(pours)}
-        <div class="field" style="margin-top:12px"><label>注水方式</label>${choiceRow("pourMethod", DATA.pourMethods || [], d.pourMethod || "")}</div>
-        <div class="field other-field" ${otherPour ? "" : "hidden"} id="pour-other-wrap">
-          <label>其他注水方式</label>
-          <input name="pourMethodOther" value="${esc(d.pourMethodOther || "")}" placeholder="请写明">
-        </div>
-        <div class="field"><label>扰动</label>${choiceRow("agitation", DATA.agitationTypes || [], d.agitation || "")}</div>
-      </section>
-      <section class="brew-group">
-        <h3>萃取</h3>
-        ${unitInput("time", d.time, "", { label: "总萃取时间", required: true, placeholder: "2:45", time: true, test: "brew-time" })}
-        <div class="form-grid">
-          ${unitInput("beverageWeight", d.beverageWeight, "g", { label: "萃取液重量（可选）", placeholder: "220", test: "beverage-weight" })}
-          ${unitInput("tds", d.tds, "%", { label: "TDS（可选）", placeholder: "1.35", test: "tds" })}
-        </div>
-        <div class="ratio-box" data-testid="ey-box">
-          <span class="tiny">萃取率（自动，需 TDS 和萃取液重量）</span>
-          <strong id="ey-output">${esc(ey ? ey + "%" : "未填齐时不计算")}</strong>
-        </div>
+        <p class="tiny" id="pour-sum-live-extra"></p>
       </section>
       <section class="brew-group">
         <h3>风味</h3>
@@ -828,76 +888,72 @@
     if (!form) return state.draftHw;
     const fd = new FormData(form);
     const d = state.draftHw || emptyDraftHw();
-    const keys = [
-      "beanName",
-      "process",
-      "processOther",
-      "roastLevel",
-      "roastDate",
-      "dripper",
-      "dripperOther",
-      "filter",
-      "grinder",
-      "grind",
-      "dose",
-      "water",
-      "temp",
-      "waterType",
-      "tdsWater",
-      "bloomWater",
-      "bloomTime",
-      "pourMethod",
-      "pourMethodOther",
-      "agitation",
-      "time",
-      "beverageWeight",
-      "tds",
-      "notes"
-    ];
+    const keys = ["beanName", "process", "processOther", "roastLevel", "roastDate", "grind", "dose", "water", "ratio", "notes"];
     keys.forEach((k) => {
       if (fd.has(k)) d[k] = String(fd.get(k) || "").trim();
     });
+    if (d.ratio && d.ratio.indexOf(":") < 0 && parseNum(d.ratio) != null) d.ratio = "1:" + String(parseRatioNumber(d.ratio));
     const pours = [];
-    form.querySelectorAll(".pour-row").forEach((row) => {
+    form.querySelectorAll(".pour-card, .pour-row").forEach((row) => {
       const i = row.getAttribute("data-index");
       pours.push({
         water: String(fd.get("pour-water-" + i) || "").trim(),
-        time: String(fd.get("pour-time-" + i) || "").trim()
+        temp: String(fd.get("pour-temp-" + i) || "").trim(),
+        flow: String(fd.get("pour-flow-" + i) || "").trim(),
+        pattern: String(fd.get("pour-pattern-" + i) || "").trim(),
+        pause: String(fd.get("pour-pause-" + i) || "").trim()
       });
     });
     if (pours.length) d.pours = pours;
-    d.ratio = formatRatio(d.dose, d.water);
-    d.ey = formatEY(d.dose, d.beverageWeight, d.tds);
-    if (fd.has("finish")) d.flavours = Object.assign(normalizeFlavours(d.flavours), { finish: String(fd.get("finish") || "") });
+    if (d.dose && d.ratio && (d.water == null || d.water === "")) d.water = waterFromDoseRatio(d.dose, d.ratio);
+    if (d.dose && d.water) d.ratio = formatRatio(d.dose, d.water) || d.ratio;
     state.draftHw = d;
     return d;
   }
 
-  function updateBrewCalcs() {
+  function updateBrewCalcs(e) {
     const form = $("#hw-form");
     if (!form) return;
-    const dose = form.querySelector('[name="dose"]');
-    const water = form.querySelector('[name="water"]');
-    const bev = form.querySelector('[name="beverageWeight"]');
-    const tds = form.querySelector('[name="tds"]');
+    const doseEl = form.querySelector('[name="dose"]');
+    const waterEl = form.querySelector('[name="water"]');
+    const ratioEl = form.querySelector('[name="ratio"]');
     const roast = form.querySelector('[name="roastDate"]');
-    const ratioEl = $("#ratio-output");
-    const eyEl = $("#ey-output");
     const ageEl = $("#roast-age");
-    const ratio = formatRatio(dose && dose.value, water && water.value);
-    if (ratioEl) ratioEl.textContent = ratio || "请先填粉量和水量";
-    const ey = formatEY(dose && dose.value, bev && bev.value, tds && tds.value);
-    if (eyEl) eyEl.textContent = ey ? ey + "%" : "未填齐时不计算";
-    if (ageEl) ageEl.textContent = roastAgeText(roast && roast.value);
-    const dripperOther = $("#dripper-other-wrap");
+    const source = e && e.target && e.target.getAttribute ? e.target.getAttribute("name") : "";
+    const dose = doseEl && doseEl.value;
+    if (source === "ratio" || source === "dose") {
+      const ratioVal = ratioEl && ratioEl.value;
+      const w = waterFromDoseRatio(dose, ratioVal);
+      if (w && waterEl && source !== "water") waterEl.value = w;
+    } else if (source === "water") {
+      const r = formatRatio(dose, waterEl && waterEl.value);
+      if (r && ratioEl) {
+        const n = parseRatioNumber(r);
+        if (n != null) ratioEl.value = String(n);
+      }
+    }
     const processOther = $("#process-other-wrap");
-    const pourOther = $("#pour-other-wrap");
-    const dripper = form.querySelector('input[name="dripper"]:checked');
     const process = form.querySelector('input[name="process"]:checked');
-    const pourMethod = form.querySelector('input[name="pourMethod"]:checked');
-    if (dripperOther) dripperOther.hidden = !(dripper && dripper.value === "其他");
     if (processOther) processOther.hidden = !(process && process.value === "其他");
-    if (pourOther) pourOther.hidden = !(pourMethod && pourMethod.value === "其他");
+    if (ageEl) ageEl.textContent = roastAgeText(roast && roast.value);
+    const sumEl = $("#pour-count");
+    const extra = $("#pour-sum-live-extra");
+    const pours = [];
+    form.querySelectorAll(".pour-card").forEach((row) => {
+      const i = row.getAttribute("data-index");
+      const inp = form.querySelector('[name="pour-water-' + i + '"]');
+      pours.push({ water: inp ? inp.value : "" });
+    });
+    const sum = poursWaterSum(pours);
+    const water = waterEl && waterEl.value;
+    let msg = "共 " + Math.max(pours.length, 1) + " 段";
+    if (sum) {
+      const target = parseNum(water);
+      if (target != null) {
+        msg += (Math.abs(sum - target) < 0.15 ? "，注水合计 " + sum + " g，与总水量一致" : "，注水合计 " + sum + " g，总水量 " + water + " g");
+      } else msg += "，注水合计 " + sum + " g";
+    }
+    if (sumEl) sumEl.textContent = msg;
   }
 
   function refreshBrewFlavourAndPours() {
@@ -907,7 +963,6 @@
     const pourBox = $("#pour-list");
     if (pourBox) {
       const html = renderPourRows(state.draftHw.pours);
-      const wrap = pourBox.parentNode;
       const tmp = document.createElement("div");
       tmp.innerHTML = html;
       const current = pourBox;
@@ -929,48 +984,33 @@
 
   function collectBrewParamsForSubmit() {
     const d = collectBrewDraftFromForm();
-    const pours = normalizePours(d.pours);
+    const pours = normalizePours(d.pours, d);
+    const ratio = d.ratio || formatRatio(d.dose, d.water);
+    const water = d.water || waterFromDoseRatio(d.dose, ratio);
     return {
       beanName: d.beanName || "",
       process: d.process || "",
       processOther: d.process === "其他" ? d.processOther || "" : "",
       roastLevel: d.roastLevel || "",
       roastDate: d.roastDate || "",
-      dripper: d.dripper || "",
-      dripperOther: d.dripper === "其他" ? d.dripperOther || "" : "",
-      filter: d.filter || "",
-      grinder: d.grinder || "",
       grind: d.grind || "",
       dose: d.dose || "",
-      water: d.water || "",
-      ratio: formatRatio(d.dose, d.water),
-      temp: d.temp || "",
-      waterType: d.waterType || "",
-      tdsWater: d.tdsWater || "",
-      bloomWater: d.bloomWater || "",
-      bloomTime: d.bloomTime || "",
-      pours,
-      pourMethod: d.pourMethod || "",
-      pourMethodOther: d.pourMethod === "其他" ? d.pourMethodOther || "" : "",
-      agitation: d.agitation || "",
-      time: d.time || "",
-      beverageWeight: d.beverageWeight || "",
-      tds: d.tds || "",
-      ey: formatEY(d.dose, d.beverageWeight, d.tds)
+      water: water || "",
+      ratio: ratio || "",
+      pours
     };
   }
 
   function validateBrewSubmit(photos, params) {
     if (!photos || !photos.length) return "请先拍一张或选一张照片";
     if (parseNum(params.dose) == null || parseNum(params.dose) <= 0) return "请填写粉量，单位是克";
-    if (parseNum(params.water) == null || parseNum(params.water) <= 0) return "请填写总水量，单位是克";
-    if (parseNum(params.temp) == null) return "请填写水温";
-    if (!(params.grind && String(params.grind).trim())) return "请填写磨豆机刻度";
-    if (!validBrewTime(params.time)) return "请填写总萃取时间，格式如 2:45";
+    if (!(params.grind && String(params.grind).trim())) return "请填写刻度";
+    const water = parseNum(params.water) || parseNum(waterFromDoseRatio(params.dose, params.ratio));
+    if (water == null || water <= 0) return "请填写粉水比或总水量";
+    const first = (params.pours || [])[0];
+    if (!first || parseNum(first.water) == null || parseNum(first.water) <= 0) return "请填写闷蒸水量";
     return "";
   }
-
-
 
   function pendingCount() {
     return state.homework.filter((h) => h.status === "pending").length;
@@ -1592,7 +1632,7 @@
         .map((h) => {
           const pending = h.status === "pending";
           const typ = hwTypeMeta(h.type);
-          const extra = h.type === "latte" ? (h.params && h.params.pattern) : (h.params && h.params.dripper);
+          const extra = h.type === "latte" ? (h.params && h.params.pattern) : ((h.params && (h.params.ratio || formatRatio(h.params.dose, h.params.water))) || (h.params && h.params.grind));
           return `<a class="card hw-item" href="#student/homework/${esc(h.id)}" style="display:block;margin-bottom:12px" data-testid="hw-item-${esc(h.id)}">
             <div class="row-card" style="grid-template-columns:76px 1fr">
               <img src="${hwThumb(h)}" alt="">
@@ -2053,7 +2093,7 @@
         .map((h) => {
           const pending = h.status === "pending";
           const typ = hwTypeMeta(h.type);
-          const extra = h.type === "latte" ? (h.params && h.params.pattern) : (h.params && h.params.dripper);
+          const extra = h.type === "latte" ? (h.params && h.params.pattern) : ((h.params && (h.params.ratio || formatRatio(h.params.dose, h.params.water))) || (h.params && h.params.grind));
           return `<a class="card hw-item" href="#teacher/grade/${esc(h.id)}" style="display:block;margin-bottom:12px" data-testid="grade-item-${esc(h.id)}">
             <div class="row-card" style="grid-template-columns:76px 1fr">
               <img src="${hwThumb(h)}" alt="">
@@ -3132,7 +3172,7 @@
     } else if (action === "add-pour") {
       e.preventDefault();
       collectBrewDraftFromForm();
-      state.draftHw.pours = (state.draftHw.pours && state.draftHw.pours.length ? state.draftHw.pours : [{ water: "", time: "" }]).concat([{ water: "", time: "" }]);
+      state.draftHw.pours = (state.draftHw.pours && state.draftHw.pours.length ? state.draftHw.pours : [emptyPour()]).concat([emptyPour()]);
       refreshBrewFlavourAndPours();
     } else if (action === "remove-pour") {
       e.preventDefault();
@@ -3140,7 +3180,7 @@
       const i = Number(t.getAttribute("data-index"));
       const list = (state.draftHw.pours || []).slice();
       if (list.length <= 1) {
-        state.draftHw.pours = [{ water: "", time: "" }];
+        state.draftHw.pours = [emptyPour()];
       } else {
         list.splice(i, 1);
         state.draftHw.pours = list;

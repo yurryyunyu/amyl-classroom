@@ -1,4 +1,4 @@
-const CACHE = "amyl-course-preview-v5";
+const CACHE = "amyl-course-preview-v6";
 const ASSETS = [
   "./",
   "./index.html",

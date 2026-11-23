@@ -187,6 +187,7 @@ window.AMYL_DATA = {
   pourMethods: ["绕圈", "中心", "其他"],
   agitationTypes: ["无", "摇晃", "搅拌"],
   finishLengths: ["短", "中", "长"],
+  pourPatterns: ["中心", "螺旋", "绕圈"],
 
   homework: [
     {
@@ -206,29 +207,15 @@ window.AMYL_DATA = {
         process: "水洗",
         roastLevel: "中浅",
         roastDate: "2026-11-12",
-        dripper: "V60",
-        filter: "Hario 02 漂白（示例）",
-        grinder: "Comandante C40（示例）",
         grind: "20",
         dose: "15",
         water: "250",
         ratio: "1:16.7",
-        temp: "92",
-        waterType: "纯净水",
-        tdsWater: "80",
-        bloomWater: "45",
-        bloomTime: "30",
         pours: [
-          { water: "45", time: "0:30" },
-          { water: "150", time: "1:15" },
-          { water: "250", time: "2:00" }
-        ],
-        pourMethod: "绕圈",
-        agitation: "无",
-        time: "2:50",
-        beverageWeight: "220",
-        tds: "1.35",
-        ey: "19.8"
+          { water: "45", temp: "92", flow: "3.0", pattern: "绕圈", pause: "30" },
+          { water: "105", temp: "92", flow: "3.2", pattern: "绕圈", pause: "15" },
+          { water: "100", temp: "90", flow: "3.2", pattern: "绕圈", pause: "0" }
+        ]
       },
       flavours: {
         tags: [
@@ -277,29 +264,15 @@ window.AMYL_DATA = {
         process: "水洗",
         roastLevel: "中浅",
         roastDate: "2026-11-08",
-        dripper: "V60",
-        filter: "Hario 02 漂白（示例）",
-        grinder: "Comandante C40（示例）",
         grind: "18",
         dose: "15",
         water: "250",
         ratio: "1:16.7",
-        temp: "90",
-        waterType: "纯净水",
-        tdsWater: "75",
-        bloomWater: "45",
-        bloomTime: "30",
         pours: [
-          { water: "45", time: "0:30" },
-          { water: "140", time: "1:10" },
-          { water: "250", time: "1:55" }
-        ],
-        pourMethod: "绕圈",
-        agitation: "无",
-        time: "2:45",
-        beverageWeight: "218",
-        tds: "1.40",
-        ey: "20.3"
+          { water: "45", temp: "90", flow: "3.0", pattern: "绕圈", pause: "30" },
+          { water: "95", temp: "90", flow: "3.2", pattern: "绕圈", pause: "15" },
+          { water: "110", temp: "90", flow: "3.2", pattern: "螺旋", pause: "0" }
+        ]
       },
       flavours: {
         tags: [
