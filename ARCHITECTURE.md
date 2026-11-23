@@ -82,7 +82,7 @@ RLS 建议：
 
 `homework_submissions` 增加 `type`，参数放 json（`params`），不要为每种作业再拆一套表。
 
-照片进 **Supabase Storage**（例如桶 `homework`），表里只存路径，不要把原图放进数据库。批改完成后用 `points_ledger` 记一笔示例积分（如批改 +20，获评优秀再 +10）。老师端批改台就是这些表的队列视图，不必另做一套 CMS。
+照片进 **Supabase Storage**（例如桶 `homework`），表里只存路径，不要把原图放进数据库。批改完成后用 `points_ledger` 记一笔示例积分（如批改 +20，获评优秀再 +30）。老师端批改台就是这些表的队列视图，不必另做一套 CMS。
 
 ### 社区
 

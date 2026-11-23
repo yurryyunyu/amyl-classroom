@@ -581,6 +581,19 @@ h2.block-title .en {
 }
 .buybar .btn-primary, .buybar .btn-gold { width: auto; flex: 1; }
 
+.buybar-owned {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.outline-note {
+  margin: -4px 0 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+
 /* Shop grid */
 .grid-2 {
   display: grid;

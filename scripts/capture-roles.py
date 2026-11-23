@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "screenshots"
 ASSETS = ROOT / "assets"
 BASE = "http://127.0.0.1:8767/index.html"
+STORE = "amyl-course-app-preview-v2"
 OUT.mkdir(exist_ok=True)
 
 errors: list[str] = []
@@ -90,7 +91,7 @@ def main():
 
         # First open with empty storage should land on #role
         page.goto(BASE, wait_until="domcontentloaded")
-        page.evaluate("() => localStorage.removeItem('amyl-course-app-preview-v1')")
+        page.evaluate(f"() => {{ localStorage.removeItem('{STORE}'); localStorage.removeItem('amyl-course-app-preview-v1'); }}")
         page.goto(BASE, wait_until="networkidle")
         wait_ready(page)
         page.wait_for_timeout(300)
@@ -115,7 +116,7 @@ def main():
         if "拍照交作业" not in page.locator("#view").inner_text():
             errors.append("student home missing 拍照交作业")
 
-        go(page, "#student/homework/new")
+        go(page, "#student/homework/new/brew")
         # pick two photos
         page.set_input_files(
             '[data-testid="hw-photos"]',

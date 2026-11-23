@@ -14,8 +14,8 @@ window.AMYL_DATA = {
     tierId: "barista",
     points: 1680,
     streak: 5,
-    /* Today is Sat 21 Nov 2026; streak Mon–Fri, today not yet checked in */
-    checkedInDates: ["2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20"],
+    /* Seed check-in dates are generated in app.js: the 5 days ending yesterday (Asia/Shanghai), today not yet checked in. */
+    checkedInDates: [],
     enrolled: {
       "pour-over-intro": { currentLesson: 2, completed: [1] },
       "latte-art": { currentLesson: 1, completed: [] }

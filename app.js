@@ -5,6 +5,75 @@
   const DATA = window.AMYL_DATA;
   const STORE_KEY = "amyl-course-app-preview-v2";
 
+  const TZ = "Asia/Shanghai";
+
+  function todayISO() {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(new Date());
+  }
+
+  function addDaysISO(iso, delta) {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d + delta));
+    const yyyy = dt.getUTCFullYear();
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(dt.getUTCDate()).padStart(2, "0");
+    return yyyy + "-" + mm + "-" + dd;
+  }
+
+  function mondayOfWeek(iso) {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const dow = dt.getUTCDay();
+    const back = dow === 0 ? 6 : dow - 1;
+    return addDaysISO(iso, -back);
+  }
+
+  function seedCheckinDates(today) {
+    const dates = [];
+    for (let i = 5; i >= 1; i--) dates.push(addDaysISO(today, -i));
+    return dates;
+  }
+
+  function computeStreak(dates, today) {
+    const set = new Set((dates || []).filter(Boolean));
+    let cursor = today;
+    if (!set.has(today)) {
+      const yesterday = addDaysISO(today, -1);
+      if (!set.has(yesterday)) return 0;
+      cursor = yesterday;
+    }
+    let n = 0;
+    while (set.has(cursor)) {
+      n += 1;
+      cursor = addDaysISO(cursor, -1);
+    }
+    return n;
+  }
+
+  function withSeedCheckinHistory(pointsHistory, seedDates) {
+    const others = [];
+    (pointsHistory || []).forEach((p) => {
+      if (p.title !== "每日打卡") others.push(p);
+    });
+    const checkins = seedDates
+      .slice()
+      .reverse()
+      .map((date, i) => ({
+        id: "p-checkin-" + date,
+        date,
+        title: "每日打卡",
+        titleEn: "Daily check-in",
+        delta: 5
+      }));
+    return checkins.concat(others).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)));
+  }
+
+
   const esc = (s) =>
     String(s ?? "")
       .replace(/&/g, "&amp;")
@@ -29,10 +98,12 @@
   }
 
   function loadState() {
+    const today = todayISO();
+    const seedDates = seedCheckinDates(today);
     const base = {
       points: DATA.user.points,
-      streak: DATA.user.streak,
-      checkedInDates: DATA.user.checkedInDates.slice(),
+      streak: computeStreak(seedDates, today),
+      checkedInDates: seedDates,
       enrolled: JSON.parse(JSON.stringify(DATA.user.enrolled)),
       cart: {},
       liked: {},
@@ -40,7 +111,7 @@
       comments: JSON.parse(JSON.stringify(DATA.comments)),
       homework: DATA.homework.map((h) => Object.assign({}, h, { params: Object.assign({}, h.params) })),
       orders: DATA.orders.map((o) => Object.assign({}, o)),
-      pointsHistory: DATA.pointsHistory.map((p) => Object.assign({}, p)),
+      pointsHistory: withSeedCheckinHistory(DATA.pointsHistory.map((p) => Object.assign({}, p)), seedDates),
       role: null,
       teacherFilter: "pending",
       teacherTypeFilter: "all",
@@ -64,6 +135,8 @@
         draftPost: Object.assign(base.draftPost, saved.draftPost || {})
       });
       merged.homework = (merged.homework || []).map(normalizeHomeworkItem);
+      merged.checkedInDates = Array.isArray(merged.checkedInDates) ? merged.checkedInDates.slice() : seedDates;
+      merged.streak = computeStreak(merged.checkedInDates, today);
       return merged;
     } catch (e) {
       return base;
@@ -96,16 +169,7 @@
 
   let state = loadState();
   let toastTimer = 0;
-
-  function todayISO() {
-    const f = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Shanghai",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit"
-    });
-    return f.format(new Date());
-  }
+  saveState();
 
   function nowTime() {
     return new Intl.DateTimeFormat("en-GB", {
@@ -351,22 +415,15 @@
   }
 
   function weekDots() {
-    /* Week of 16–22 Nov 2026, Mon–Sun. Today Sat 21. */
-    const days = [
-      { key: "2026-11-16", label: "一" },
-      { key: "2026-11-17", label: "二" },
-      { key: "2026-11-18", label: "三" },
-      { key: "2026-11-19", label: "四" },
-      { key: "2026-11-20", label: "五" },
-      { key: "2026-11-21", label: "六" },
-      { key: "2026-11-22", label: "日" }
-    ];
     const today = todayISO();
-    return days
-      .map((d) => {
-        const on = state.checkedInDates.includes(d.key);
-        const isToday = d.key === today;
-        return `<span><i class="dot${on ? " on" : ""}${isToday ? " today" : ""}"></i>${d.label}</span>`;
+    const mon = mondayOfWeek(today);
+    const labels = ["一", "二", "三", "四", "五", "六", "日"];
+    return labels
+      .map((label, i) => {
+        const key = addDaysISO(mon, i);
+        const on = state.checkedInDates.includes(key);
+        const isToday = key === today;
+        return `<span><i class="dot${on ? " on" : ""}${isToday ? " today" : ""}"></i>${label}</span>`;
       })
       .join("");
   }
@@ -452,6 +509,7 @@
       <h2 class="block-title">你将获得<span class="en">What you get</span></h2>
       <ul class="includes">${c.includes.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
       <h2 class="block-title">课程大纲<span class="en">Lessons</span></h2>
+      <p class="sub outline-note">以下为示例大纲，正式课程内容稍后提供。</p>
       <ol class="outline">
         ${c.outline
           .map((l) => {
@@ -472,8 +530,11 @@
       </div>
       <div class="buybar">
         <div>
-          <div class="price">${money(owned ? 0 : sale)}</div>
-          ${owned ? '<span class="tiny" style="color:var(--ink-2)">已开通</span>' : `<span class="tiny">示例价</span>`}
+          ${
+            owned
+              ? `<span class="buybar-owned">已开通</span>`
+              : `<div class="price">${money(sale)}</div><span class="tiny">示例价</span>`
+          }
         </div>
         ${
           owned
@@ -607,6 +668,7 @@
         <a href="#student/homework/new/brew"><strong>冲煮作业</strong><em>Brewing</em></a>
       </div>
       <h2 class="block-title">我的课程<span class="en">My courses</span></h2>
+      <p class="sub outline-note">以下为示例大纲，正式课程内容稍后提供。</p>
       ${
         ids.length
           ? ids
@@ -1610,8 +1672,9 @@
       showToast("今天已经打过卡了");
       return;
     }
-    state.checkedInDates.push(todayISO());
-    state.streak += 1;
+    const today = todayISO();
+    if (!state.checkedInDates.includes(today)) state.checkedInDates.push(today);
+    state.streak = computeStreak(state.checkedInDates, today);
     addPoints(5, "每日打卡", "Daily check-in");
     saveState();
     showToast("打卡成功，积分 +5（示例）");
@@ -1741,7 +1804,7 @@
     delete state.draftGrade[id];
     if (h.studentId === "me") {
       addPoints(20, "作业获批改「" + h.titleZh + "」", "Homework graded", true);
-      if (badge === "优秀") addPoints(10, "作业获评优秀", "Homework rated excellent", true);
+      if (badge === "优秀") addPoints(30, "作业获评优秀", "Homework rated excellent", true);
     }
     saveState();
     showToast(h.studentId === "me" ? "已批改，学员积分已记上（示例）" : "已批改（示例）");

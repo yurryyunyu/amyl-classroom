@@ -9,6 +9,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "screenshots"
 BASE = "http://127.0.0.1:8767/index.html"
+STORE = "amyl-course-app-preview-v2"
 OUT.mkdir(exist_ok=True)
 
 errors: list[str] = []
@@ -85,16 +86,18 @@ def main():
         page.on("pageerror", on_pageerror)
         page.on("requestfailed", on_requestfailed)
 
-        page.goto(BASE + "#home", wait_until="domcontentloaded")
-        page.evaluate("() => localStorage.removeItem('amyl-course-app-preview-v1')")
-        go(page, "#home")
+        page.goto(BASE, wait_until="domcontentloaded")
+        page.evaluate(
+            f"() => {{ localStorage.removeItem('{STORE}'); localStorage.removeItem('amyl-course-app-preview-v1'); }}"
+        )
+        go(page, "#student/home")
 
         for href, label in [
-            ("#courses", "课程"),
-            ("#community", "社区"),
-            ("#learn", "学习"),
-            ("#me", "我的"),
-            ("#home", "首页"),
+            ("#student/courses", "课程"),
+            ("#student/community", "社区"),
+            ("#student/learn", "学习"),
+            ("#student/me", "我的"),
+            ("#student/home", "首页"),
         ]:
             page.click(f'#tabbar a[href="{href}"]')
             wait_ready(page)
@@ -104,13 +107,15 @@ def main():
 
         shot(page, "home.png")
 
-        go(page, "#courses")
+        go(page, "#student/courses")
         shot(page, "courses.png")
 
-        go(page, "#course/pour-over-intro")
+        go(page, "#student/course/pour-over-intro")
         shot(page, "course-detail.png")
 
-        go(page, "#course/cupping")
+        go(page, "#student/product/dripper")
+        page.click('[data-action="add-cart-go"]')
+        wait_ready(page)
         page.click('[data-action="open-checkout"]')
         page.wait_for_selector(".sheet", state="visible")
         page.wait_for_timeout(280)
@@ -118,16 +123,16 @@ def main():
         page.click('[data-action="close-overlay"]')
         page.wait_for_selector("#overlay", state="hidden")
 
-        go(page, "#shop")
+        go(page, "#student/shop")
         shot(page, "shop.png")
 
-        go(page, "#learn")
+        go(page, "#student/learn")
         shot(page, "learn.png")
 
-        go(page, "#homework/new")
+        go(page, "#student/homework/new")
         shot(page, "homework-submit.png")
 
-        go(page, "#homework/hw-circles")
+        go(page, "#student/homework/hw-brew-graded")
         page.evaluate(
             """() => {
               const view = document.querySelector('#view');
@@ -140,16 +145,16 @@ def main():
         page.wait_for_timeout(200)
         shot(page, "homework-feedback.png")
 
-        go(page, "#me")
+        go(page, "#student/me")
         shot(page, "me.png")
 
-        go(page, "#member")
+        go(page, "#student/member")
         shot(page, "member.png")
 
-        go(page, "#community")
+        go(page, "#student/community")
         shot(page, "community.png")
 
-        go(page, "#post/post-xiaolin")
+        go(page, "#student/post/post-xiaolin")
         page.evaluate(
             """() => {
               const view = document.querySelector('#view');
@@ -161,15 +166,15 @@ def main():
         shot(page, "post-detail.png")
 
         # Interactions
-        go(page, "#product/dripper")
+        go(page, "#student/product/dripper")
         page.click('[data-action="add-cart"]')
         page.wait_for_timeout(250)
-        go(page, "#cart")
+        go(page, "#student/cart")
         cart_text = page.locator("#view").inner_text()
         if "滤杯" not in cart_text:
             errors.append("cart did not show added dripper")
 
-        go(page, "#learn")
+        go(page, "#student/learn")
         page.click('[data-action="checkin"]')
         page.wait_for_timeout(400)
         toast = ""
@@ -184,12 +189,12 @@ def main():
             if not disabled:
                 errors.append("check-in did not toast or disable")
 
-        go(page, "#homework")
+        go(page, "#student/homework")
         if "待批改" not in page.locator("#view").inner_text():
             errors.append("homework list missing 待批改")
 
         # Like on post
-        go(page, "#post/post-amy-1")
+        go(page, "#student/post/post-amy-1")
         page.click('[data-action="like"]')
         page.wait_for_timeout(200)
         liked = page.eval_on_selector('[data-action="like"]', "el => el.classList.contains('liked')")
