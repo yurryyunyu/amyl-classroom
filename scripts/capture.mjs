@@ -2,12 +2,12 @@ import { chromium } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const outDir = path.join(root, "screenshots");
 const BASE = process.env.APP_URL || "http://127.0.0.1:8767/index.html";
+const STORE = "amyl-course-app-preview-v2";
 
 const errors = [];
 const logs = [];
@@ -15,7 +15,6 @@ const logs = [];
 async function waitReady(page) {
   await page.waitForSelector("#view", { state: "visible", timeout: 15000 });
   await page.evaluate(() => document.fonts && document.fonts.ready);
-  // wait for images in view
   await page.evaluate(async () => {
     const imgs = Array.from(document.querySelectorAll("img")).filter((i) => !i.complete);
     await Promise.all(
@@ -32,6 +31,14 @@ async function waitReady(page) {
   await page.waitForTimeout(180);
 }
 
+async function resetScroll(page) {
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const v = document.querySelector("#view");
+    if (v) v.scrollTop = 0;
+  });
+}
+
 async function shot(page, name) {
   await waitReady(page);
   const dest = path.join(outDir, name);
@@ -42,6 +49,7 @@ async function shot(page, name) {
 async function go(page, hash) {
   await page.goto(BASE + hash, { waitUntil: "networkidle", timeout: 30000 });
   await waitReady(page);
+  await resetScroll(page);
 }
 
 (async () => {
@@ -67,18 +75,19 @@ async function go(page, hash) {
     errors.push("requestfailed: " + u + " " + req.failure()?.errorText);
   });
 
-  // Fresh demo state
-  await page.goto(BASE + "#home", { waitUntil: "domcontentloaded" });
-  await page.evaluate(() => localStorage.removeItem("amyl-course-app-preview-v1"));
-  await go(page, "#home");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.evaluate((store) => {
+    localStorage.removeItem(store);
+    localStorage.removeItem("amyl-course-app-preview-v1");
+  }, STORE);
+  await go(page, "#student/home");
 
-  // Verify tab navigation
   const tabs = [
-    ["#courses", "课程"],
-    ["#community", "社区"],
-    ["#learn", "学习"],
-    ["#me", "我的"],
-    ["#home", "首页"]
+    ["#student/courses", "课程"],
+    ["#student/community", "社区"],
+    ["#student/learn", "学习"],
+    ["#student/me", "我的"],
+    ["#student/home", "首页"]
   ];
   for (const [hash, label] of tabs) {
     await page.click(`#tabbar a[href="${hash}"]`);
@@ -89,66 +98,86 @@ async function go(page, hash) {
 
   await shot(page, "home.png");
 
-  await go(page, "#courses");
+  await go(page, "#student/courses");
   await shot(page, "courses.png");
 
-  await go(page, "#course/pour-over-intro");
+  await go(page, "#student/course/pour-over-intro");
   await shot(page, "course-detail.png");
 
-  await go(page, "#course/cupping");
+  await go(page, "#student/product/dripper");
+  await page.click('[data-action="add-cart-go"]');
+  await waitReady(page);
   await page.click('[data-action="open-checkout"]');
   await page.waitForSelector(".sheet", { state: "visible" });
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(280);
   await shot(page, "checkout.png");
   await page.click('[data-action="close-overlay"]');
   await page.waitForSelector("#overlay", { state: "hidden" });
 
-  await go(page, "#shop");
+  await go(page, "#student/shop");
   await shot(page, "shop.png");
 
-  await go(page, "#learn");
+  await go(page, "#student/learn");
   await shot(page, "learn.png");
 
-  await go(page, "#homework/new");
+  await go(page, "#student/homework/new");
   await shot(page, "homework-submit.png");
 
-  await go(page, "#homework/hw-circles");
+  await go(page, "#student/homework/hw-brew-graded");
+  await page.evaluate(() => {
+    const view = document.querySelector("#view");
+    const el = document.querySelector(".feedback-box");
+    if (!view || !el) return;
+    const top = el.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop;
+    view.scrollTop = Math.max(0, top - 8);
+  });
+  await page.waitForTimeout(200);
   await shot(page, "homework-feedback.png");
 
-  await go(page, "#me");
+  await go(page, "#student/me");
   await shot(page, "me.png");
 
-  await go(page, "#member");
+  await go(page, "#student/member");
   await shot(page, "member.png");
 
-  await go(page, "#community");
+  await go(page, "#student/community");
   await shot(page, "community.png");
 
-  await go(page, "#post/post-xiaolin");
+  await go(page, "#student/post/post-xiaolin");
+  await page.evaluate(() => {
+    const view = document.querySelector("#view");
+    const el = document.querySelector(".comments") || document.querySelector("h2.block-title");
+    if (view && el) view.scrollTop = Math.max(0, el.offsetTop - 220);
+  });
+  await page.waitForTimeout(200);
   await shot(page, "post-detail.png");
 
-  // Extra interaction checks (no screenshots required)
-  await go(page, "#product/dripper");
+  await go(page, "#student/product/dripper");
   await page.click('[data-action="add-cart"]');
-  await page.waitForTimeout(200);
-  await go(page, "#cart");
+  await page.waitForTimeout(250);
+  await go(page, "#student/cart");
   const cartText = await page.locator("#view").innerText();
   if (!cartText.includes("滤杯")) errors.push("cart did not show added dripper");
 
-  await go(page, "#learn");
+  await go(page, "#student/learn");
   await page.click('[data-action="checkin"]');
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(400);
   const toast = await page.locator("#toast").innerText().catch(() => "");
   if (!toast.includes("打卡") && !toast.includes("已经")) {
-    // might already be checked if rerun; still ok if button disabled
     const disabled = await page.$eval('[data-action="checkin"]', (el) => el.disabled).catch(() => false);
     if (!disabled) errors.push("check-in did not toast or disable");
   }
 
-  await go(page, "#homework");
+  await go(page, "#student/homework");
   if (!(await page.locator("#view").innerText()).includes("待批改")) {
     errors.push("homework list missing 待批改");
   }
+
+  await go(page, "#student/post/post-amy-1");
+  await page.click('[data-action="like"]');
+  await page.waitForTimeout(200);
+  const liked = await page.$eval('[data-action="like"]', (el) => el.classList.contains("liked")).catch(() => false);
+  if (!liked) errors.push("like toggle did not apply class");
 
   await browser.close();
 
