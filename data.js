@@ -181,6 +181,7 @@ window.AMYL_DATA = {
   milkTypes: ["全脂", "燕麦", "杏仁", "脱脂", "其他"],
   milkTemps: ["50–55°C", "55–60°C", "60–65°C"],
   drippers: ["V60", "Kalita", "Origami", "其他"],
+  brewMethods: ["滴滤", "浸泡"],
   processMethods: ["水洗", "日晒", "蜜处理", "厌氧", "其他"],
   roastLevels: ["浅", "中浅", "中", "中深", "深"],
   waterTypes: ["纯净水", "矿泉水", "自配水"],

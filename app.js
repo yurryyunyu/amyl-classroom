@@ -156,7 +156,9 @@
             (saved.draftHw && Array.isArray(saved.draftHw.pours) && saved.draftHw.pours.length) ? saved.draftHw.pours : base.draftHw.pours,
             saved.draftHw || {}
           ),
-          bedPhoto: saved.draftHw && saved.draftHw.bedPhoto ? String(saved.draftHw.bedPhoto).trim() : ""
+          bedPhoto: saved.draftHw && saved.draftHw.bedPhoto ? String(saved.draftHw.bedPhoto).trim() : "",
+          brewMethod: saved.draftHw && saved.draftHw.brewMethod ? String(saved.draftHw.brewMethod).trim() : "",
+          dripperSize: saved.draftHw && saved.draftHw.dripperSize ? String(saved.draftHw.dripperSize).trim() : ""
         }),
         draftGrade: Object.assign({}, saved.draftGrade || {}),
         draftPost: Object.assign(base.draftPost, saved.draftPost || {})
@@ -342,8 +344,10 @@
       processOther: "",
       roastLevel: "",
       roastDate: "",
+      brewMethod: "",
       dripper: "V60",
       dripperOther: "",
+      dripperSize: "",
       filter: "",
       grinder: "",
       grind: "",
@@ -594,7 +598,20 @@
       const auto = formatEY(out.dose, out.beverageWeight, out.tds);
       if (auto) out.ey = auto;
     }
+    out.brewMethod = out.brewMethod != null ? String(out.brewMethod).trim() : "";
+    out.dripper = out.dripper != null ? String(out.dripper).trim() : "";
+    out.dripperOther = out.dripper === "其他" && out.dripperOther != null ? String(out.dripperOther).trim() : "";
+    out.dripperSize = out.dripperSize != null ? String(out.dripperSize).trim() : "";
     return out;
+  }
+
+  function dripperDisplay(p) {
+    const name = p && p.dripper ? String(p.dripper).trim() : "";
+    if (!name) return "";
+    if (name === "其他" && p.dripperOther && String(p.dripperOther).trim()) {
+      return "其他 · " + String(p.dripperOther).trim();
+    }
+    return name;
   }
 
   function displayVal(v, unit) {
@@ -689,6 +706,14 @@
           ${recipeCell("处理法", process)}
           ${recipeCell("烘焙度", p.roastLevel)}
           ${recipeCell("烘焙日期", roast)}
+        </div>
+      </div>
+      <div class="recipe-block" data-testid="recipe-dripper-block">
+        <h4>滤杯</h4>
+        <div class="form-grid">
+          ${recipeCell("冲煮方式", p.brewMethod)}
+          ${recipeCell("滤杯名称", dripperDisplay(p))}
+          ${recipeCell("滤杯尺寸", p.dripperSize)}
         </div>
       </div>
       <div class="xb-header" data-testid="xb-header">
@@ -830,6 +855,7 @@
     const water = d.water || waterFromDoseRatio(d.dose, ratio);
     const age = roastAgeText(d.roastDate);
     const otherProcess = (d.process || "") === "其他";
+    const otherDripper = (d.dripper || "") === "其他";
     const ratioNum = parseRatioNumber(ratio);
     const ratioShow = ratio || "";
     return `
@@ -849,6 +875,25 @@
           <label>烘焙日期</label>
           <input name="roastDate" type="date" value="${esc(d.roastDate || "")}" data-testid="roast-date">
           <p class="tiny" id="roast-age">${esc(age)}</p>
+        </div>
+      </section>
+      <section class="brew-group" data-testid="brew-dripper-fields">
+        <h3>滤杯</h3>
+        <div class="field" data-testid="brew-method-field">
+          <label class="required-mark">冲煮方式<span class="req">必填</span></label>
+          ${choiceRow("brewMethod", DATA.brewMethods || ["滴滤", "浸泡"], d.brewMethod || "")}
+        </div>
+        <div class="field" data-testid="dripper-name-field">
+          <label>滤杯名称</label>
+          ${choiceRow("dripper", DATA.drippers || ["V60", "Kalita", "Origami", "其他"], d.dripper || "")}
+        </div>
+        <div class="field other-field" ${otherDripper ? "" : "hidden"} id="dripper-other-wrap">
+          <label>其他滤杯名称</label>
+          <input name="dripperOther" value="${esc(d.dripperOther || "")}" placeholder="请写明" data-testid="dripper-other" autocomplete="off">
+        </div>
+        <div class="field" data-testid="dripper-size-field">
+          <label>滤杯尺寸</label>
+          <input name="dripperSize" value="${esc(d.dripperSize || "")}" placeholder="02 / 2人份 / 500ml" data-testid="dripper-size" autocomplete="off">
         </div>
       </section>
       <section class="brew-group">
@@ -891,7 +936,7 @@
     if (!form) return state.draftHw;
     const fd = new FormData(form);
     const d = state.draftHw || emptyDraftHw();
-    const keys = ["beanName", "process", "processOther", "roastLevel", "roastDate", "grind", "dose", "water", "ratio", "notes"];
+    const keys = ["beanName", "process", "processOther", "roastLevel", "roastDate", "brewMethod", "dripper", "dripperOther", "dripperSize", "grind", "dose", "water", "ratio", "notes"];
     keys.forEach((k) => {
       if (fd.has(k)) d[k] = String(fd.get(k) || "").trim();
     });
@@ -938,6 +983,9 @@
     const processOther = $("#process-other-wrap");
     const process = form.querySelector('input[name="process"]:checked');
     if (processOther) processOther.hidden = !(process && process.value === "其他");
+    const dripperOther = $("#dripper-other-wrap");
+    const dripper = form.querySelector('input[name="dripper"]:checked');
+    if (dripperOther) dripperOther.hidden = !(dripper && dripper.value === "其他");
     if (ageEl) ageEl.textContent = roastAgeText(roast && roast.value);
     const sumEl = $("#pour-count");
     const extra = $("#pour-sum-live-extra");
@@ -996,6 +1044,10 @@
       processOther: d.process === "其他" ? d.processOther || "" : "",
       roastLevel: d.roastLevel || "",
       roastDate: d.roastDate || "",
+      brewMethod: d.brewMethod || "",
+      dripper: d.dripper || "",
+      dripperOther: d.dripper === "其他" ? d.dripperOther || "" : "",
+      dripperSize: d.dripperSize || "",
       grind: d.grind || "",
       dose: d.dose || "",
       water: water || "",
@@ -1007,6 +1059,8 @@
   function validateBrewSubmit(photos, params, bedPhoto) {
     if (!photos || !photos.length) return "请先拍一张或选一张照片";
     if (!(bedPhoto && String(bedPhoto).trim())) return "请拍一张粉层照片";
+    if (!(params.brewMethod && String(params.brewMethod).trim())) return "请选择冲煮方式";
+    if (params.dripper === "其他" && !(params.dripperOther && String(params.dripperOther).trim())) return "请填写滤杯名称";
     if (parseNum(params.dose) == null || parseNum(params.dose) <= 0) return "请填写粉量，单位是克";
     if (!(params.grind && String(params.grind).trim())) return "请填写刻度";
     const water = parseNum(params.water) || parseNum(waterFromDoseRatio(params.dose, params.ratio));
@@ -1850,7 +1904,9 @@
           ["奶温", p.milkTemp]
         ]
       : [
-          ["滤杯", p.dripper],
+          ["冲煮方式", p.brewMethod],
+          ["滤杯名称", dripperDisplay(p)],
+          ["滤杯尺寸", p.dripperSize],
           ["粉量", p.dose],
           ["水量", p.water],
           ["粉水比", p.ratio],
