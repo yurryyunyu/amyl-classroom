@@ -1997,3 +1997,20 @@ h2.block-title .en {
 .xb-pour-cell.is-empty strong { color: var(--muted-soft); font-weight: 600; }
 .xb-sum { margin: 8px 0 0; }
 .fb-recipe .xb-header { margin-bottom: 10px; }
+
+.fb-photo-stack { display: flex; flex-direction: column; gap: 12px; margin: 0 0 4px; }
+.fb-photo-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1A1A1A;
+  margin: 0 0 8px;
+}
+.fb-photo-card[data-source="bed"] .fb-stage,
+.fb-photo-card[data-source="main"] .fb-stage { border-radius: 16px; }
+.fb-photo-card[data-source="bed"] .fb-stage.empty {
+  background: #F4E4C8;
+  color: #1A1A1A;
+  min-height: 160px;
+  aspect-ratio: 4 / 3;
+}
+.bed-hint { margin: 0 0 8px; }

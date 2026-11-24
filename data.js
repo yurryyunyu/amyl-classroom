@@ -202,6 +202,7 @@ window.AMYL_DATA = {
       submittedAt: "2026-11-18 21:14",
       photo: "assets/water.webp",
       photos: ["assets/water.webp"],
+      bedPhoto: "assets/willow.webp",
       params: {
         beanName: "埃塞俄比亚 耶加雪菲（示例）",
         process: "水洗",
@@ -259,6 +260,7 @@ window.AMYL_DATA = {
       gradedAt: "2026-11-16 11:20",
       photo: "assets/featured-events.jpg",
       photos: ["assets/featured-events.jpg"],
+      bedPhoto: "assets/thumb-site.jpg",
       params: {
         beanName: "埃塞俄比亚 科契尔（示例）",
         process: "水洗",

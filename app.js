@@ -94,6 +94,7 @@
     const item = Object.assign({}, h, {
       photos,
       photo: photos[0] || h.photo || "",
+      bedPhoto: type === "brew" ? String(h.bedPhoto || "").trim() : "",
       params: type === "brew" ? normalizeBrewParams(paramsRaw) : paramsRaw,
       flavours: type === "brew" ? normalizeFlavours(flavoursRaw) : (h.flavours || null),
       type,
@@ -154,7 +155,8 @@
           pours: normalizePours(
             (saved.draftHw && Array.isArray(saved.draftHw.pours) && saved.draftHw.pours.length) ? saved.draftHw.pours : base.draftHw.pours,
             saved.draftHw || {}
-          )
+          ),
+          bedPhoto: saved.draftHw && saved.draftHw.bedPhoto ? String(saved.draftHw.bedPhoto).trim() : ""
         }),
         draftGrade: Object.assign({}, saved.draftGrade || {}),
         draftPost: Object.assign(base.draftPost, saved.draftPost || {})
@@ -363,6 +365,7 @@
       ey: "",
       notes: "",
       photos: [],
+      bedPhoto: "",
       flavours: emptyFlavours()
     };
   }
@@ -1001,8 +1004,9 @@
     };
   }
 
-  function validateBrewSubmit(photos, params) {
+  function validateBrewSubmit(photos, params, bedPhoto) {
     if (!photos || !photos.length) return "请先拍一张或选一张照片";
+    if (!(bedPhoto && String(bedPhoto).trim())) return "请拍一张粉层照片";
     if (parseNum(params.dose) == null || parseNum(params.dose) <= 0) return "请填写粉量，单位是克";
     if (!(params.grind && String(params.grind).trim())) return "请填写刻度";
     const water = parseNum(params.water) || parseNum(waterFromDoseRatio(params.dose, params.ratio));
@@ -1377,6 +1381,7 @@
         return {
           id: String(m.id || "mk-" + i),
           photoIndex: Math.max(0, Number(m.photoIndex) || 0),
+          source: m.source === "bed" ? "bed" : "main",
           x,
           y,
           note: String(m.note || "").trim()
@@ -1426,26 +1431,40 @@
     return { x: Math.max(4, Math.min(96, x)), y: Math.max(4, Math.min(96, y)) };
   }
 
-  function renderPins(markers, photoIndex, action) {
+  function markerSource(m) {
+    return m && m.source === "bed" ? "bed" : "main";
+  }
+
+  function markerPhotoLabel(m, photos, hasBed) {
+    if (markerSource(m) === "bed") return "粉层";
+    if (hasBed) return photos && photos.length > 1 ? "作业 第 " + (m.photoIndex + 1) + " 张" : "作业照片";
+    if (photos && photos.length > 1) return "第 " + (m.photoIndex + 1) + " 张";
+    return "";
+  }
+
+  function renderPins(markers, photoIndex, action, source) {
+    const src = source || "main";
     const all = markers || [];
     return all
       .map((m, i) => {
-        if (m.photoIndex !== photoIndex) return "";
+        if (markerSource(m) !== src) return "";
+        if (src === "main" && m.photoIndex !== photoIndex) return "";
         return `<button type="button" class="fb-pin" style="left:${m.x}%;top:${m.y}%" data-action="${esc(action)}" data-marker="${esc(m.id)}" aria-label="标注 ${i + 1}">${i + 1}</button>`;
       })
       .join("");
   }
 
-  function renderMarkerList(markers, photos, interactive) {
-    const list = markers || [];
+  function renderMarkerList(markers, photos, interactive, source, hasBed) {
+    const src = source || "main";
+    const list = (markers || []).map((m, i) => ({ m, i })).filter((x) => markerSource(x.m) === src);
     if (!list.length) return "";
-    return `<ul class="fb-marker-list" data-testid="marker-list">
+    return `<ul class="fb-marker-list" data-testid="marker-list${src === "bed" ? "-bed" : ""}">
       ${list
-        .map((m, i) => {
-          const many = photos && photos.length > 1;
+        .map(({ m, i }) => {
+          const label = markerPhotoLabel(m, photos, hasBed);
           return `<li>
             <span class="fb-pin-num">${i + 1}</span>
-            <span class="fb-marker-text">${esc(m.note || "（未写短评）")}${many ? `<em>第 ${m.photoIndex + 1} 张</em>` : ""}</span>
+            <span class="fb-marker-text">${esc(m.note || "（未写短评）")}${label ? `<em>${esc(label)}</em>` : ""}</span>
             ${
               interactive
                 ? `<button type="button" class="fb-mini" data-action="edit-marker" data-marker="${esc(m.id)}">改</button>
@@ -1459,14 +1478,21 @@
   }
 
   function renderFeedbackPhoto(photos, markers, photoIndex, opts) {
+    const o = opts || {};
     const list = photos && photos.length ? photos : [];
-    const interactive = !!(opts && opts.interactive);
+    const interactive = !!o.interactive;
+    const source = o.source || "main";
+    const title = o.title || "";
+    const hasBed = !!o.hasBed;
     if (!list.length) {
-      return `<div class="fb-photo-card" id="fb-photo-card"><div class="fb-stage empty"><p>没有照片</p></div></div>`;
+      return `<div class="fb-photo-card" id="fb-photo-card-${esc(source)}" data-source="${esc(source)}" data-testid="${esc(source)}-photo-card">
+        ${title ? `<p class="fb-photo-title">${esc(title)}</p>` : ""}
+        <div class="fb-stage empty"><p>${esc(o.emptyText || "没有照片")}</p></div>
+      </div>`;
     }
     const idx = Math.max(0, Math.min(list.length - 1, photoIndex || 0));
     const src = list[idx];
-    const mode = interactive && opts && opts.markMode ? "mark" : "zoom";
+    const mode = interactive && o.markMode ? "mark" : "zoom";
     const pinAction = interactive ? "edit-marker" : "show-marker-note";
     const thumbs =
       list.length > 1
@@ -1474,7 +1500,7 @@
             ${list
               .map(
                 (p, i) =>
-                  `<button type="button" class="fb-thumb ${i === idx ? "on" : ""}" data-action="fb-thumb" data-index="${i}" aria-label="第 ${i + 1} 张">
+                  `<button type="button" class="fb-thumb ${i === idx ? "on" : ""}" data-action="fb-thumb" data-index="${i}" data-source="${esc(source)}" aria-label="第 ${i + 1} 张">
                     <img src="${esc(p)}" alt="">
                   </button>`
               )
@@ -1483,30 +1509,56 @@
         : "";
     const tools = interactive
       ? `<div class="fb-photo-tools">
-           <button type="button" class="fb-mode ${mode === "mark" ? "on" : ""}" data-action="toggle-mark-mode" data-testid="toggle-mark-mode">${mode === "mark" ? "退出标注" : "在照片上标注"}</button>
-           <button type="button" class="fb-mode" data-action="zoom-photo" data-src="${esc(src)}" data-index="${idx}">全屏查看</button>
+           <button type="button" class="fb-mode ${mode === "mark" ? "on" : ""}" data-action="toggle-mark-mode" data-source="${esc(source)}" data-testid="toggle-mark-mode-${esc(source)}">${mode === "mark" ? "退出标注" : "在照片上标注"}</button>
+           <button type="button" class="fb-mode" data-action="zoom-photo" data-src="${esc(src)}" data-index="${idx}" data-source="${esc(source)}" data-testid="zoom-${esc(source)}">全屏查看</button>
          </div>
-         <p class="tiny fb-photo-hint">${mode === "mark" ? "点照片上的位置，写一句短评，例如「这里奶泡太厚」。" : "点照片可放大。打开标注后，可在图上加编号备注。"}</p>`
+         <p class="tiny fb-photo-hint">${mode === "mark" ? "点照片上的位置，写一句短评，例如「这里粉层偏高」。" : "点照片可放大。打开标注后，可在图上加编号备注。"}</p>`
       : "";
-    return `<div class="fb-photo-card" id="fb-photo-card" data-mode="${mode}">
-      <div class="fb-stage" id="fb-stage">
-        <img class="fb-main-photo" id="fb-main-photo" src="${esc(src)}" alt="作业照片" data-index="${idx}" data-src="${esc(src)}">
-        <div class="fb-pins">${renderPins(markers, idx, pinAction)}</div>
+    return `<div class="fb-photo-card" id="fb-photo-card-${esc(source)}" data-source="${esc(source)}" data-mode="${mode}" data-testid="${esc(source)}-photo-card">
+      ${title ? `<p class="fb-photo-title">${esc(title)}</p>` : ""}
+      <div class="fb-stage" id="fb-stage-${esc(source)}" data-source="${esc(source)}">
+        <img class="fb-main-photo" id="fb-main-photo-${esc(source)}" src="${esc(src)}" alt="${esc(title || "作业照片")}" data-index="${idx}" data-src="${esc(src)}" data-source="${esc(source)}">
+        <div class="fb-pins">${renderPins(markers, idx, pinAction, source)}</div>
       </div>
       ${thumbs}
       ${tools}
-      ${renderMarkerList(markers, list, interactive)}
+      ${renderMarkerList(markers, list, interactive, source, hasBed)}
     </div>`;
   }
 
+  function renderHomeworkPhotos(h, markers, opts) {
+    const o = opts || {};
+    const isBrew = h && h.type === "brew";
+    const hasBed = isBrew;
+    const mainCard = renderFeedbackPhoto((h && h.photos) || [], markers, o.photoIndex || 0, {
+      interactive: !!o.interactive,
+      markMode: !!o.markMode && (o.markSource || "main") === "main",
+      source: "main",
+      title: isBrew ? "作业照片" : "",
+      hasBed
+    });
+    if (!isBrew) return `<div id="fb-photo-stack" data-testid="photo-stack">${mainCard}</div>`;
+    const bed = h && h.bedPhoto ? [h.bedPhoto] : [];
+    const bedCard = renderFeedbackPhoto(bed, markers, 0, {
+      interactive: !!o.interactive && bed.length > 0,
+      markMode: !!o.markMode && o.markSource === "bed",
+      source: "bed",
+      title: "粉层照片",
+      emptyText: "未上传",
+      hasBed
+    });
+    return `<div id="fb-photo-stack" data-testid="photo-stack">${mainCard}${bedCard}</div>`;
+  }
+
   let pendingNewMarker = null;
-  let pinLayoutObserver = null;
+  let pinLayoutObservers = [];
+
+  function clearPinLayoutObservers() {
+    pinLayoutObservers.forEach((o) => o.disconnect());
+    pinLayoutObservers = [];
+  }
 
   function bindPinLayout(stage) {
-    if (pinLayoutObserver) {
-      pinLayoutObserver.disconnect();
-      pinLayoutObserver = null;
-    }
     if (!stage) return;
     const img = stage.querySelector(".fb-main-photo");
     const layout = () => layoutPinLayer(stage);
@@ -1515,20 +1567,23 @@
       else img.addEventListener("load", layout, { once: true });
     }
     if (typeof ResizeObserver !== "undefined") {
-      pinLayoutObserver = new ResizeObserver(layout);
-      pinLayoutObserver.observe(stage);
-      if (img) pinLayoutObserver.observe(img);
+      const obs = new ResizeObserver(layout);
+      obs.observe(stage);
+      if (img) obs.observe(img);
+      pinLayoutObservers.push(obs);
     }
   }
 
   function refreshFeedbackPhoto(id) {
-    const wrap = $("#fb-photo-card");
+    const wrap = $("#fb-photo-stack") || $("#fb-photo-card-main") || $("#fb-photo-card");
     const h = state.homework.find((x) => x.id === id);
     if (!wrap || !h) return;
     const d = gradeDraftFor(id);
-    wrap.outerHTML = renderFeedbackPhoto(h.photos, d.markers, d.photoIndex, {
+    wrap.outerHTML = renderHomeworkPhotos(h, d.markers, {
       interactive: true,
-      markMode: d.markMode
+      photoIndex: d.photoIndex,
+      markMode: d.markMode,
+      markSource: d.markSource
     });
     bindFeedbackPhotoEvents(id);
   }
@@ -1669,6 +1724,16 @@
     </div>`;
   }
 
+  function renderBedThumb(src) {
+    if (!src) return "";
+    return `<div class="thumbs" id="hw-bed-thumbs" data-testid="hw-bed-thumbs">
+      <div class="thumb">
+        <img src="${esc(src)}" alt="粉层照片">
+        <button type="button" class="x" data-action="remove-bed-photo" aria-label="删除粉层照片">×</button>
+      </div>
+    </div>`;
+  }
+
   function choiceRow(name, options, current) {
     return `<div class="choice-row">
       ${options
@@ -1701,26 +1766,46 @@
             <p class="kicker">Brewing</p>
             <h3>冲煮</h3>
             <p class="en-line">Photograph your brew</p>
-            <p>拍下粉床和成品，记下粉量、滤杯和风味。</p>
+            <p>拍下成品和粉层，记下粉量、刻度和风味。</p>
           </div>
         </a>
       </div>
     `;
   }
 
-  function renderPhotoField(photos, extraNote) {
+  function renderPhotoField(photos, extraNote, opts) {
+    const o = opts || {};
+    const label = o.label || "作业照片";
+    const hint = o.hint || "点这里拍照或从相册选图，可多选（演示，仅本地）";
+    const req = o.required ? `<span class="req">必填</span>` : `<span class="hint">Photos</span>`;
     return `
         <div class="field">
-          <label>作业照片 <span class="hint">Photos</span></label>
+          <label class="${o.required ? "required-mark" : ""}">${esc(label)} ${req}</label>
           <label class="uploader camera" id="hw-uploader">
             <input type="file" accept="image/*" capture="environment" multiple id="hw-photos" data-testid="hw-photos" />
             <div class="ph">
               <strong>拍照交作业</strong>
-              点这里拍照或从相册选图，可多选（演示，仅本地）
+              ${esc(hint)}
             </div>
           </label>
           ${renderThumbs(photos)}
           ${extraNote || ""}
+        </div>`;
+  }
+
+  function renderBedPhotoField(src) {
+    return `
+        <div class="field" data-testid="bed-photo-field">
+          <label class="required-mark">粉层照片<span class="req">必填</span></label>
+          <p class="tiny bed-hint">冲完后从正上方拍滤杯里的粉层</p>
+          <label class="uploader camera" id="hw-bed-uploader">
+            <input type="file" accept="image/*" capture="environment" id="hw-bed-photo" data-testid="hw-bed-photo" />
+            <div class="ph">
+              <strong>拍粉层</strong>
+              冲完后从正上方拍滤杯里的粉层（演示，仅本地）
+            </div>
+          </label>
+          ${renderBedThumb(src)}
         </div>`;
   }
 
@@ -1747,7 +1832,8 @@
       <h2 class="block-title" style="margin-top:4px">交一份${esc(typ.nameZh)}作业</h2>
       <p class="sub" style="margin-bottom:14px">在手机上会打开相机。照片只留在这台设备上，不会上传到服务器。</p>
       <form class="form" id="hw-form" data-type="${esc(typ.id)}">
-        ${renderPhotoField(photos, videoNote)}
+        ${renderPhotoField(photos, videoNote, type === "brew" ? { label: "作业照片", hint: "杯子或成品，可多选（演示，仅本地）", required: true } : null)}
+        ${type === "brew" ? renderBedPhotoField(d.bedPhoto || "") : ""}
         ${fields}
         <button class="btn-primary" type="submit" data-testid="hw-submit">提交${esc(typ.nameZh)}作业（演示）</button>
       </form>
@@ -1797,9 +1883,9 @@
       </div>
       <h2 class="block-title" style="margin-top:6px">${esc(hwTypeMeta(h.type).nameZh)}<span class="en">${esc(hwTypeMeta(h.type).nameEn)}</span></h2>
       <article class="card fb-student-photo" style="margin-bottom:14px">
-        ${renderFeedbackPhoto(h.photos, markers, 0, { interactive: false })}
+        ${renderHomeworkPhotos(h, markers, { interactive: false })}
         <div class="pad">
-          <p class="tiny">提交于 ${esc(h.submittedAt)}${h.photos && h.photos.length > 1 ? " · " + h.photos.length + " 张照片" : ""}</p>
+          <p class="tiny">提交于 ${esc(h.submittedAt)}${h.photos && h.photos.length > 1 ? " · " + h.photos.length + " 张作业照片" : ""}${h.type === "brew" ? (h.bedPhoto ? " · 已交粉层照片" : " · 粉层未上传") : ""}</p>
           ${
             h.type === "brew"
               ? `${renderBrewRecipeCard(h)}${renderFlavourView(h.flavours)}${h.notes ? `<p class="hw-notes">${esc(h.notes)}</p>` : ""}`
@@ -2140,7 +2226,8 @@
       itemNotes,
       markers,
       photoIndex: saved.photoIndex != null ? saved.photoIndex : 0,
-      markMode: Boolean(saved.markMode)
+      markMode: Boolean(saved.markMode),
+      markSource: saved.markSource === "bed" ? "bed" : "main"
     };
   }
 
@@ -2152,7 +2239,7 @@
     $$("[data-item-note]").forEach((el) => {
       itemNotes[el.getAttribute("data-item-note")] = el.value;
     });
-    const photoEl = $("#fb-main-photo");
+    const photoEl = $("#fb-main-photo-main") || $(".fb-photo-card-main .fb-main-photo") || $("#fb-main-photo");
     const photoIndex = photoEl ? Number(photoEl.getAttribute("data-index")) || 0 : base.photoIndex || 0;
     const prev = state.draftGrade[id] || {};
     state.draftGrade[id] = {
@@ -2162,7 +2249,8 @@
       itemNotes,
       markers: prev.markers ? normalizeMarkers(prev.markers) : (base.markers || []),
       photoIndex,
-      markMode: Boolean(prev.markMode)
+      markMode: Boolean(prev.markMode),
+      markSource: prev.markSource === "bed" ? "bed" : "main"
     };
     return state.draftGrade[id];
   }
@@ -2193,7 +2281,7 @@
             <p class="sub">${esc(typ.nameZh)} · 提交于 ${esc(h.submittedAt)}</p>
           </div>
         </div>
-        ${renderFeedbackPhoto(h.photos, d.markers, d.photoIndex, { interactive: true, markMode: d.markMode })}
+        ${renderHomeworkPhotos(h, d.markers, { interactive: true, photoIndex: d.photoIndex, markMode: d.markMode, markSource: d.markSource })}
         <article class="card pad fb-recipe" style="margin:12px 0">
           ${
             typ.id === "brew"
@@ -2440,18 +2528,19 @@
     o.classList.toggle("fb-zoom-overlay", mode === "zoom");
   }
 
-  function openPhotoZoom(src, markers, photoIndex) {
+  function openPhotoZoom(src, markers, photoIndex, source) {
+    const srcKind = source || "main";
     const list = markers || [];
     const notes = list
-      .map((m, i) => (m.photoIndex === photoIndex && m.note ? `<li><span class="fb-pin-num">${i + 1}</span>${esc(m.note)}</li>` : ""))
+      .map((m, i) => (markerSource(m) === srcKind && (srcKind === "bed" || m.photoIndex === photoIndex) && m.note ? `<li><span class="fb-pin-num">${i + 1}</span>${esc(m.note)}</li>` : ""))
       .join("");
     openOverlay(
       `
       <div class="fb-zoom" role="dialog" aria-label="查看照片">
         <button class="fb-zoom-close" type="button" data-action="close-overlay">关闭</button>
         <div class="fb-stage fb-stage-zoom" id="fb-zoom-stage">
-          <img class="fb-main-photo" src="${esc(src)}" alt="作业照片大图">
-          <div class="fb-pins">${renderPins(list, photoIndex, "show-marker-note")}</div>
+          <img class="fb-main-photo" src="${esc(src)}" alt="${srcKind === "bed" ? "粉层照片大图" : "作业照片大图"}" data-source="${esc(srcKind)}" data-index="${photoIndex || 0}">
+          <div class="fb-pins">${renderPins(list, photoIndex, "show-marker-note", srcKind)}</div>
         </div>
         ${notes ? `<ol class="fb-zoom-notes">${notes}</ol>` : ""}
       </div>`,
@@ -2842,31 +2931,34 @@
   }
 
   function bindFeedbackPhotoEvents(hwId) {
-    const stage = $("#fb-stage");
-    bindPinLayout(stage);
-    if (!stage) return;
-    stage.addEventListener("click", (e) => {
-      if (e.target.closest(".fb-pin")) return;
-      const img = $("#fb-main-photo");
-      if (!img) return;
-      const id = hwId || (($("#grade-form") && $("#grade-form").getAttribute("data-id")) || "");
-      const idx = Number(img.getAttribute("data-index")) || 0;
-      const src = img.getAttribute("data-src") || img.src;
-      if (id && state.draftGrade[id] && state.draftGrade[id].markMode) {
-        const pt = pointToPercent(img, e.clientX, e.clientY);
-        if (!pt) {
-          showToast("请点在照片上");
+    clearPinLayoutObservers();
+    $$(".fb-stage").forEach((stage) => {
+      if (stage.classList.contains("fb-stage-zoom")) return;
+      bindPinLayout(stage);
+      stage.addEventListener("click", (e) => {
+        if (e.target.closest(".fb-pin")) return;
+        const img = stage.querySelector(".fb-main-photo");
+        if (!img) return;
+        const id = hwId || (($("#grade-form") && $("#grade-form").getAttribute("data-id")) || "");
+        const idx = Number(img.getAttribute("data-index")) || 0;
+        const src = img.getAttribute("data-src") || img.src;
+        const source = img.getAttribute("data-source") || "main";
+        if (id && state.draftGrade[id] && state.draftGrade[id].markMode && (state.draftGrade[id].markSource || "main") === source) {
+          const pt = pointToPercent(img, e.clientX, e.clientY);
+          if (!pt) {
+            showToast("请点在照片上");
+            return;
+          }
+          syncGradeFormToDraft(id);
+          const marker = { id: "mk-" + Date.now(), photoIndex: idx, source, x: pt.x, y: pt.y, note: "" };
+          state.draftGrade[id].markers = state.draftGrade[id].markers || [];
+          state.draftGrade[id].markers.push(marker);
+          openMarkerSheet(id, marker, true);
           return;
         }
-        syncGradeFormToDraft(id);
-        const marker = { id: "mk-" + Date.now(), photoIndex: idx, x: pt.x, y: pt.y, note: "" };
-        state.draftGrade[id].markers = state.draftGrade[id].markers || [];
-        state.draftGrade[id].markers.push(marker);
-        openMarkerSheet(id, marker, true);
-        return;
-      }
-      const markers = id ? gradeDraftFor(id).markers : studentMarkersFromView();
-      openPhotoZoom(src, markers, idx);
+        const markers = id ? gradeDraftFor(id).markers : studentMarkersFromView();
+        openPhotoZoom(src, markers, idx, source);
+      });
     });
   }
 
@@ -2893,6 +2985,25 @@
             if (thumbs) thumbs.outerHTML = html;
             else $("#hw-uploader").insertAdjacentHTML("afterend", html);
             photo.value = "";
+          });
+        });
+      }
+      const bedInput = $("#hw-bed-photo");
+      if (bedInput) {
+        bedInput.addEventListener("change", () => {
+          const files = bedInput.files ? Array.from(bedInput.files) : [];
+          if (!files.length) return;
+          readFilesAsDataURLs(files.slice(0, 1)).then((urls) => {
+            state.draftHw.bedPhoto = urls[0] || "";
+            const box = $("#hw-bed-thumbs");
+            const html = renderBedThumb(state.draftHw.bedPhoto);
+            if (box) {
+              if (html) box.outerHTML = html;
+              else box.remove();
+            } else if (html) {
+              $("#hw-bed-uploader").insertAdjacentHTML("afterend", html);
+            }
+            bedInput.value = "";
           });
         });
       }
@@ -2924,7 +3035,8 @@
             };
           } else {
             params = collectBrewParamsForSubmit();
-            const err = validateBrewSubmit(photos, params);
+            const bedPhoto = state.draftHw.bedPhoto || "";
+            const err = validateBrewSubmit(photos, params, bedPhoto);
             if (err) {
               showToast(err);
               return;
@@ -2945,6 +3057,7 @@
             submittedAt: todayISO() + " " + nowTime(),
             photo: photos[0],
             photos,
+            bedPhoto: type === "brew" ? (state.draftHw.bedPhoto || "") : "",
             params,
             flavours,
             notes
@@ -3169,6 +3282,11 @@
         if (html) box.outerHTML = html;
         else box.remove();
       }
+    } else if (action === "remove-bed-photo") {
+      e.preventDefault();
+      state.draftHw.bedPhoto = "";
+      const box = $("#hw-bed-thumbs");
+      if (box) box.remove();
     } else if (action === "add-pour") {
       e.preventDefault();
       collectBrewDraftFromForm();
@@ -3258,8 +3376,14 @@
       const form = $("#grade-form");
       const id = form && form.getAttribute("data-id");
       if (!id) return;
+      const source = t.getAttribute("data-source") || "main";
       syncGradeFormToDraft(id);
-      state.draftGrade[id].markMode = !state.draftGrade[id].markMode;
+      const d = state.draftGrade[id];
+      if (d.markMode && (d.markSource || "main") === source) d.markMode = false;
+      else {
+        d.markMode = true;
+        d.markSource = source;
+      }
       refreshFeedbackPhoto(id);
     } else if (action === "fb-thumb") {
       e.preventDefault();
@@ -3271,12 +3395,12 @@
         state.draftGrade[id].photoIndex = idx;
         refreshFeedbackPhoto(id);
       } else {
-        const card = $("#fb-photo-card");
         const route = parseRoute();
         const h = state.homework.find((x) => x.id === route.id);
-        if (!card || !h) return;
+        const stack = $("#fb-photo-stack");
+        if (!stack || !h) return;
         const markers = normalizeMarkers(h.feedback && h.feedback.markers);
-        card.outerHTML = renderFeedbackPhoto(h.photos, markers, idx, { interactive: false });
+        stack.outerHTML = renderHomeworkPhotos(h, markers, { interactive: false, photoIndex: idx });
         bindFeedbackPhotoEvents(null);
       }
     } else if (action === "zoom-photo") {
@@ -3285,8 +3409,9 @@
       const id = form && form.getAttribute("data-id");
       const idx = Number(t.getAttribute("data-index")) || 0;
       const src = t.getAttribute("data-src");
+      const source = t.getAttribute("data-source") || "main";
       const markers = id ? gradeDraftFor(id).markers : studentMarkersFromView();
-      openPhotoZoom(src, markers, idx);
+      openPhotoZoom(src, markers, idx, source);
     } else if (action === "edit-marker") {
       e.preventDefault();
       const form = $("#grade-form");
