@@ -345,7 +345,7 @@
       roastLevel: "",
       roastDate: "",
       brewMethod: "",
-      dripper: "V60",
+      dripper: "",
       dripperOther: "",
       dripperSize: "",
       filter: "",
@@ -879,11 +879,12 @@
       </section>
       <section class="brew-group" data-testid="brew-dripper-fields">
         <h3>滤杯</h3>
+        <p class="sr-only" id="dripper-live" data-testid="dripper-live" aria-live="polite" aria-atomic="true"></p>
         <div class="field" data-testid="brew-method-field">
           <label class="required-mark">冲煮方式<span class="req">必填</span></label>
           ${choiceRow("brewMethod", DATA.brewMethods || ["滴滤", "浸泡"], d.brewMethod || "")}
         </div>
-        <div class="field" data-testid="dripper-name-field">
+        <div class="field" data-testid="dripper-name-field" ${d.brewMethod ? "" : "hidden"}>
           <label>滤杯名称</label>
           ${choiceRow("dripper", DATA.drippers || ["V60", "Kalita", "Origami", "其他"], d.dripper || "")}
         </div>
@@ -891,7 +892,7 @@
           <label>其他滤杯名称</label>
           <input name="dripperOther" value="${esc(d.dripperOther || "")}" placeholder="请写明" data-testid="dripper-other" autocomplete="off">
         </div>
-        <div class="field" data-testid="dripper-size-field">
+        <div class="field" data-testid="dripper-size-field" ${d.brewMethod && d.dripper ? "" : "hidden"}>
           <label>滤杯尺寸</label>
           <input name="dripperSize" value="${esc(d.dripperSize || "")}" placeholder="02 / 2人份 / 500ml" data-testid="dripper-size" autocomplete="off">
         </div>
@@ -983,9 +984,6 @@
     const processOther = $("#process-other-wrap");
     const process = form.querySelector('input[name="process"]:checked');
     if (processOther) processOther.hidden = !(process && process.value === "其他");
-    const dripperOther = $("#dripper-other-wrap");
-    const dripper = form.querySelector('input[name="dripper"]:checked');
-    if (dripperOther) dripperOther.hidden = !(dripper && dripper.value === "其他");
     if (ageEl) ageEl.textContent = roastAgeText(roast && roast.value);
     const sumEl = $("#pour-count");
     const extra = $("#pour-sum-live-extra");
@@ -1005,6 +1003,34 @@
       } else msg += "，注水合计 " + sum + " g";
     }
     if (sumEl) sumEl.textContent = msg;
+    updateDripperSteps();
+  }
+
+  function updateDripperSteps() {
+    const form = $("#hw-form");
+    if (!form || form.getAttribute("data-type") !== "brew") return;
+    const live = $("#dripper-live");
+    const nameField = form.querySelector('[data-testid="dripper-name-field"]');
+    const otherWrap = $("#dripper-other-wrap");
+    const sizeField = form.querySelector('[data-testid="dripper-size-field"]');
+    const method = form.querySelector('input[name="brewMethod"]:checked');
+    const dripper = form.querySelector('input[name="dripper"]:checked');
+    const otherInput = form.querySelector('[name="dripperOther"]');
+    const otherFilled = !!(otherInput && String(otherInput.value || "").trim());
+    const showName = !!(method && method.value);
+    const showOther = !!(showName && dripper && dripper.value === "其他");
+    const showSize = !!(showName && dripper && dripper.value && (dripper.value !== "其他" || otherFilled));
+    const nameWasHidden = !!(nameField && nameField.hidden);
+    const sizeWasHidden = !!(sizeField && sizeField.hidden);
+    const otherWasHidden = !!(otherWrap && otherWrap.hidden);
+    if (nameField) nameField.hidden = !showName;
+    if (sizeField) sizeField.hidden = !showSize;
+    if (otherWrap) otherWrap.hidden = !showOther;
+    let msg = "";
+    if (showOther && otherWasHidden) msg = "请填写滤杯名称";
+    else if (showSize && sizeWasHidden) msg = "请填写滤杯尺寸";
+    else if (showName && nameWasHidden) msg = "请选择滤杯名称";
+    if (live && msg) live.textContent = msg;
   }
 
   function refreshBrewFlavourAndPours() {

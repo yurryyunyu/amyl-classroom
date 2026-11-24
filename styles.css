@@ -27,6 +27,12 @@
   --top-h: 52px;
   --demo-h: 28px;
   --tab-h: 64px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --bars-h: calc(var(--tab-h) + var(--demo-h) + var(--safe-bottom));
+  --demo-alone-h: calc(var(--demo-h) + var(--safe-bottom));
+  --view-pad-bottom: 24px;
+  --fb-actions-h: 70px;
+  --fb-actions-gap: 6px;
   --serif: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif;
   --serif-en: "Cormorant Garamond", "Noto Serif SC", "Noto Serif CJK SC", serif;
   --sans: "Noto Sans SC", "Noto Sans CJK SC", "Noto Sans", system-ui, sans-serif;
@@ -174,15 +180,19 @@ body::before {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px 18px calc(var(--tab-h) + var(--demo-h) + 20px);
+  padding: 8px 18px var(--view-pad-bottom);
+  margin-bottom: var(--bars-h);
   -webkit-overflow-scrolling: touch;
+}
+.view:has(.fb-actions) {
+  scroll-padding-bottom: calc(var(--fb-actions-h) + var(--fb-actions-gap) + var(--view-pad-bottom) + 8px);
 }
 
 .demo-foot {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: var(--tab-h);
+  bottom: calc(var(--tab-h) + var(--safe-bottom));
   width: min(430px, 100%);
   height: var(--demo-h);
   display: flex;
@@ -203,8 +213,8 @@ body::before {
   transform: translateX(-50%);
   bottom: 0;
   width: min(430px, 100%);
-  height: var(--tab-h);
-  padding: 0 4px 8px;
+  height: calc(var(--tab-h) + var(--safe-bottom));
+  padding: 0 4px calc(8px + var(--safe-bottom));
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   align-items: end;
@@ -567,7 +577,7 @@ h2.block-title .en {
 
 .buybar {
   position: sticky;
-  bottom: calc(var(--tab-h) + var(--demo-h) + 8px);
+  bottom: 8px;
   margin: 16px -2px 0;
   padding: 10px 10px 10px 14px;
   display: flex;
@@ -908,7 +918,7 @@ h2.block-title .en {
 .fab {
   position: fixed;
   right: calc(50% - min(215px, 50vw) + 16px);
-  bottom: calc(var(--tab-h) + var(--demo-h) + 16px);
+  bottom: calc(var(--bars-h) + 16px);
   height: 50px;
   padding: 0 16px 0 14px;
   border-radius: 99px;
@@ -1051,7 +1061,7 @@ h2.block-title .en {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--tab-h) + var(--demo-h) + 24px);
+  bottom: calc(var(--bars-h) + 24px);
   transform: translateX(-50%);
   background: var(--ink);
   color: var(--paper-2);
@@ -1083,8 +1093,15 @@ h2.block-title .en {
 
 /* Role select + teacher / camera homework */
 .app.mode-role .tabbar { display: none; }
-.app.mode-role .demo-foot { bottom: 0; }
-.app.mode-role .view { padding-bottom: calc(var(--demo-h) + 24px); }
+.app.mode-role .demo-foot {
+  bottom: 0;
+  height: var(--demo-alone-h);
+  padding-bottom: var(--safe-bottom);
+}
+.app.mode-role .view {
+  margin-bottom: var(--demo-alone-h);
+  padding-bottom: 24px;
+}
 .app.mode-teacher .tabbar { grid-template-columns: repeat(4, 1fr); }
 
 .role-hero { padding: 8px 2px 18px; text-align: center; }
@@ -1476,6 +1493,10 @@ h2.block-title .en {
 
 /* Feedback window */
 .fb-window { padding-bottom: 8px; }
+#grade-form .field:has(#grade-comments),
+#grade-comments {
+  scroll-margin-bottom: calc(var(--fb-actions-h) + var(--fb-actions-gap) + 8px);
+}
 .fb-student {
   display: flex;
   align-items: center;
@@ -1681,7 +1702,7 @@ h2.block-title .en {
 }
 .fb-actions {
   position: sticky;
-  bottom: calc(var(--demo-h) + 6px);
+  bottom: var(--fb-actions-gap);
   z-index: 16;
   display: flex;
   gap: 8px;
